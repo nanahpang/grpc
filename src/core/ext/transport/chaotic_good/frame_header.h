@@ -21,10 +21,6 @@
 
 #include "absl/status/statusor.h"
 
-#include <grpc/grpc.h>
-
-#include "src/core/lib/gprpp/bitset.h"
-
 namespace grpc_core {
 namespace chaotic_good {
 
