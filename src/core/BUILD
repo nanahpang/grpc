@@ -5501,6 +5501,7 @@ grpc_cc_library(
     deps = [
         "bitset",
         "//:gpr_platform",
+        "//:grpc",
     ],
 )
 

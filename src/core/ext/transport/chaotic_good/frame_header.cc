@@ -42,29 +42,24 @@ uint32_t ReadLittleEndianUint32(const uint8_t* data) {
 }  // namespace
 
 void FrameHeader::Serialize(uint8_t* data) const {
-  WriteLittleEndianUint32(
-      static_cast<uint32_t>(type) | (flags.ToInt<uint32_t>() << 8), data);
+  // Serializes a frame header into a buffer of 24 bytes.
+  WriteLittleEndianUint32(type_and_flags, data);
   WriteLittleEndianUint32(stream_id, data + 4);
   WriteLittleEndianUint32(header_length, data + 8);
   WriteLittleEndianUint32(message_length, data + 12);
-  WriteLittleEndianUint32(trailer_length, data + 16);
-  memset(data + 20, 0, 44);
+  WriteLittleEndianUint32(message_length, data + 16);
+  WriteLittleEndianUint32(trailer_length, data + 20);
 }
 
 absl::StatusOr<FrameHeader> FrameHeader::Parse(const uint8_t* data) {
+  // Parses a frame header from a buffer of 24 bytes. All 24 bytes are consumed.
   FrameHeader header;
-  const uint32_t type_and_flags = ReadLittleEndianUint32(data);
-  header.type = static_cast<FrameType>(type_and_flags & 0xff);
-  const uint32_t flags = type_and_flags >> 8;
-  if (flags > 7) return absl::InvalidArgumentError("Invalid flags");
-  header.flags = BitSet<3>::FromInt(flags);
+  header.type_and_flags = ReadLittleEndianUint32(data);
   header.stream_id = ReadLittleEndianUint32(data + 4);
   header.header_length = ReadLittleEndianUint32(data + 8);
   header.message_length = ReadLittleEndianUint32(data + 12);
-  header.trailer_length = ReadLittleEndianUint32(data + 16);
-  for (int i = 0; i < 44; i++) {
-    if (data[20 + i] != 0) return absl::InvalidArgumentError("Invalid padding");
-  }
+  header.message_padding = ReadLittleEndianUint32(data + 16);
+  header.trailer_length = ReadLittleEndianUint32(data + 20);
   return header;
 }
 
@@ -78,7 +73,8 @@ uint64_t RoundUp(uint64_t x) {
 FrameSizes FrameHeader::ComputeFrameSizes() const {
   FrameSizes sizes;
   sizes.message_offset = RoundUp(header_length);
-  sizes.trailer_offset = sizes.message_offset + RoundUp(message_length);
+  sizes.trailer_offset =
+      sizes.message_offset + RoundUp(message_length + message_padding);
   sizes.frame_length = sizes.trailer_offset + RoundUp(trailer_length);
   return sizes;
 }

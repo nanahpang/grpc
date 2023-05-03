@@ -21,6 +21,8 @@
 
 #include "absl/status/statusor.h"
 
+#include <grpc/grpc.h>
+
 #include "src/core/lib/gprpp/bitset.h"
 
 namespace grpc_core {
@@ -45,11 +47,11 @@ struct FrameSizes {
 };
 
 struct FrameHeader {
-  FrameType type;
-  BitSet<3> flags;
+  uint32_t type_and_flags;  // lower 8 bits specify the frame type.
   uint32_t stream_id;
   uint32_t header_length;
   uint32_t message_length;
+  uint32_t message_padding;
   uint32_t trailer_length;
 
   // Parses a frame header from a buffer of 64 bytes. All 64 bytes are consumed.
@@ -60,9 +62,10 @@ struct FrameHeader {
   FrameSizes ComputeFrameSizes() const;
 
   bool operator==(const FrameHeader& h) const {
-    return type == h.type && flags == h.flags && stream_id == h.stream_id &&
+    return type_and_flags == h.type_and_flags && stream_id == h.stream_id &&
            header_length == h.header_length &&
            message_length == h.message_length &&
+           message_padding == h.message_padding &&
            trailer_length == h.trailer_length;
   }
 };

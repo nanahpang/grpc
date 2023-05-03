@@ -18,6 +18,7 @@
 
 #include <string.h>
 
+#include <cstdint>
 #include <limits>
 #include <utility>
 
@@ -27,6 +28,7 @@
 #include <grpc/slice.h>
 #include <grpc/support/log.h>
 
+#include "src/core/ext/transport/chaotic_good/frame_header.h"
 #include "src/core/lib/gprpp/bitset.h"
 #include "src/core/lib/gprpp/no_destruct.h"
 #include "src/core/lib/gprpp/status_helper.h"
@@ -47,25 +49,52 @@ const NoDestruct<Slice> kZeroSlice{[] {
 class FrameSerializer {
  public:
   explicit FrameSerializer(FrameType type, uint32_t stream_id)
-      : header_{type, {}, stream_id, 0, 0, 0} {
+      : header_{static_cast<uint32_t>(type), stream_id, 0, 0, 0, 0} {
     output_.AppendIndexed(kZeroSlice->Copy());
   }
-  // If called, must be called before AddMessage, AddTrailers, Finish
+  // If called, must be called before AddMessage, AddPadding, AddTrailers,
+  // Finish.
   SliceBuffer& AddHeaders() {
     GPR_ASSERT(last_added_ == nullptr);
-    header_.flags.set(0);
+    // Set flag `HAS_HEADER`: 0x01.
+    flags.set(0);
+    // Update flags, where flags = type_and_flags >> 8.
+    header_.type_and_flags =
+        static_cast<uint32_t>(header_.type_and_flags & 0xff) |
+        (flags.ToInt<uint32_t>() << 8);
     return Start(&header_.header_length);
   }
-  // If called, must be called before AddTrailers, Finish
+  // If called, must be called before AddPadding, AddTrailers, Finish.
   SliceBuffer& AddMessage() {
     MaybeCommitLast();
-    header_.flags.set(1);
+    // Set flag `HAS_MESSAGE`: 0x02.
+    flags.set(1);
+    // Update flags, where flags = type_and_flags >> 8.
+    header_.type_and_flags =
+        static_cast<uint32_t>(header_.type_and_flags & 0xff) |
+        (flags.ToInt<uint32_t>() << 8);
+    return Start(&header_.message_length);
+  }
+  // If called, must be called before AddTrailers, Finish.
+  SliceBuffer& AddPadding() {
+    MaybeCommitLast();
+    // Set flag `HAS_PADDING`: 0x04
+    flags.set(2);
+    // Update flags, where flags = type_and_flags >> 8.
+    header_.type_and_flags =
+        static_cast<uint32_t>(header_.type_and_flags & 0xff) |
+        (flags.ToInt<uint32_t>() << 8);
     return Start(&header_.message_length);
   }
   // If called, must be called before Finish
   SliceBuffer& AddTrailers() {
     MaybeCommitLast();
-    header_.flags.set(2);
+    // Set flag `HAS_TRAILERS`: 0x08
+    flags.set(3);
+    // Update flags, where flags = type_and_flags >> 8.
+    header_.type_and_flags =
+        static_cast<uint32_t>(header_.type_and_flags & 0xff) |
+        (flags.ToInt<uint32_t>() << 8);
     return Start(&header_.trailer_length);
   }
 
@@ -86,9 +115,6 @@ class FrameSerializer {
   void MaybeCommitLast() {
     if (last_added_ == nullptr) return;
     *last_added_ = output_.Length() - length_at_last_added_;
-    if (output_.Length() % 64 != 0) {
-      output_.Append(kZeroSlice->RefSubSlice(0, 64 - output_.Length() % 64));
-    }
   }
 
   FrameHeader header_;
@@ -96,6 +122,7 @@ class FrameSerializer {
   uint32_t* last_added_ = nullptr;
   size_t length_at_last_added_;
   SliceBuffer output_;
+  BitSet<4> flags;  // Each bit represents a flag.
 };
 
 class FrameDeserializer {
@@ -103,15 +130,20 @@ class FrameDeserializer {
   FrameDeserializer(const FrameHeader& header, SliceBuffer& input)
       : header_(header), input_(input) {}
   const FrameHeader& header() const { return header_; }
-  // If called, must be called before ReceiveMessage, ReceiveTrailers
+  // If called, must be called before ReceiveMessage, ReceivePadding,
+  // ReceiveTrailers, Finish.
   absl::StatusOr<SliceBuffer> ReceiveHeaders() {
     return Take(header_.header_length);
   }
-  // If called, must be called before ReceiveTrailers
+  // If called, must be called before ReceivePadding, ReceiveTrailers, Finish.
   absl::StatusOr<SliceBuffer> ReceiveMessage() {
     return Take(header_.message_length);
   }
-  // If called, must be called before Finish
+  // If called, must be called before ReceiveTrailers, Finish.
+  absl::StatusOr<SliceBuffer> ReceivePadding() {
+    return Take(header_.message_padding);
+  }
+  // If called, must be called before Finish.
   absl::StatusOr<SliceBuffer> ReceiveTrailers() {
     return Take(header_.trailer_length);
   }
@@ -127,20 +159,6 @@ class FrameDeserializer {
     }
     SliceBuffer out;
     input_.MoveFirstNBytesIntoSliceBuffer(length, out);
-    if (length % 64 != 0) {
-      const uint32_t padding_length = 64 - length % 64;
-      if (input_.Length() < padding_length) {
-        return absl::InvalidArgumentError(
-            "Frame too short (insufficient padding)");
-      }
-      uint8_t padding[64];
-      input_.MoveFirstNBytesIntoBuffer(padding_length, padding);
-      for (uint32_t i = 0; i < padding_length; i++) {
-        if (padding[i] != 0) {
-          return absl::InvalidArgumentError("Frame padding not zero");
-        }
-      }
-    }
     return std::move(out);
   }
   FrameHeader header_;
@@ -175,10 +193,12 @@ absl::StatusOr<Arena::PoolPtr<Metadata>> ReadMetadata(
 
 absl::Status SettingsFrame::Deserialize(HPackParser*, const FrameHeader& header,
                                         SliceBuffer& slice_buffer) {
-  if (header.type != FrameType::kSettings) {
+  FrameType type = static_cast<FrameType>(header.type_and_flags & 0xff);
+  if (type != FrameType::kSettings) {
     return absl::InvalidArgumentError("Expected settings frame");
   }
-  if (header.flags.any()) {
+  uint32_t flags = header.type_and_flags >> 8;
+  if (flags > 0) {
     return absl::InvalidArgumentError("Unexpected flags");
   }
   FrameDeserializer deserializer(header, slice_buffer);
@@ -197,22 +217,32 @@ absl::Status ClientFragmentFrame::Deserialize(HPackParser* parser,
     return absl::InvalidArgumentError("Expected non-zero stream id");
   }
   stream_id = header.stream_id;
-  if (header.type != FrameType::kFragment) {
+  FrameType type = static_cast<FrameType>(header.type_and_flags & 0xff);
+  if (type != FrameType::kFragment) {
     return absl::InvalidArgumentError("Expected fragment frame");
   }
   FrameDeserializer deserializer(header, slice_buffer);
-  if (header.flags.is_set(0)) {
+  uint32_t flags = header.type_and_flags >> 8;
+  // Flag: HAS_HEADER.
+  if (flags & 0x01) {
     auto r = ReadMetadata<ClientMetadata>(parser, deserializer.ReceiveHeaders(),
                                           header.stream_id, true, true);
     if (!r.ok()) return r.status();
   }
-  if (header.flags.is_set(1)) {
+  // Flag: HAS_MESSAGE.
+  if (flags & 0x02) {
     message = GetContext<Arena>()->MakePooled<Message>();
     auto r = deserializer.ReceiveMessage();
     if (!r.ok()) return r.status();
     r->Swap(message->payload());
   }
-  if (header.flags.is_set(2)) {
+  // Flag: HAS_PADDING.
+  if (flags & 0x04) {
+    auto r = deserializer.ReceivePadding();
+    if (!r.ok()) return r.status();
+  }
+  // Flag: HAS_TRAILERS.
+  if (flags & 0x08) {
     if (header.trailer_length != 0) {
       return absl::InvalidArgumentError("Unexpected trailer length");
     }
@@ -245,24 +275,35 @@ absl::Status ServerFragmentFrame::Deserialize(HPackParser* parser,
     return absl::InvalidArgumentError("Expected non-zero stream id");
   }
   stream_id = header.stream_id;
-  if (header.type != FrameType::kFragment) {
+  FrameType type = static_cast<FrameType>(header.type_and_flags & 0xff);
+  if (type != FrameType::kFragment) {
     return absl::InvalidArgumentError("Expected fragment frame");
   }
   FrameDeserializer deserializer(header, slice_buffer);
-  if (header.flags.is_set(0)) {
+  uint32_t flags = header.type_and_flags >> 8;
+  // Flag: HAS_HEADER.
+  if (flags & 0x01) {
     auto r = ReadMetadata<ServerMetadata>(parser, deserializer.ReceiveHeaders(),
                                           header.stream_id, true, false);
     if (!r.ok()) return r.status();
   }
-  if (header.flags.is_set(1)) {
+  // Flag: HAS_MESSAGE.
+  if (flags & 0x02) {
     message = GetContext<Arena>()->MakePooled<Message>();
     auto r = deserializer.ReceiveMessage();
     if (!r.ok()) return r.status();
     r->Swap(message->payload());
   }
-  if (header.flags.is_set(2)) {
+  // Flag: HAS_PADDING.
+  if (flags & 0x04) {
+    auto r = deserializer.ReceivePadding();
+    if (!r.ok()) return r.status();
+  }
+  // Flag: HAS_HEADER.
+  if (flags & 0x08) {
     auto r = ReadMetadata<ServerMetadata>(
         parser, deserializer.ReceiveTrailers(), header.stream_id, false, false);
+    if (!r.ok()) return r.status();
   }
   return deserializer.Finish();
 }
@@ -284,10 +325,12 @@ SliceBuffer ServerFragmentFrame::Serialize(HPackCompressor* encoder) const {
 
 absl::Status CancelFrame::Deserialize(HPackParser*, const FrameHeader& header,
                                       SliceBuffer& slice_buffer) {
-  if (header.type != FrameType::kCancel) {
+  FrameType type = static_cast<FrameType>(header.type_and_flags & 0xff);
+  if (type != FrameType::kCancel) {
     return absl::InvalidArgumentError("Expected cancel frame");
   }
-  if (header.flags.any()) {
+  uint32_t flags = header.type_and_flags >> 8;
+  if (flags > 0) {
     return absl::InvalidArgumentError("Unexpected flags");
   }
   if (header.stream_id == 0) {
