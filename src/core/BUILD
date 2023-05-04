@@ -5524,15 +5524,8 @@ grpc_cc_library(
     hdrs = [
         "ext/transport/chaotic_good/frame_header.h",
     ],
-    external_deps = [
-        "absl/status",
-        "absl/status:statusor",
-    ],
-    deps = [
-        "bitset",
-        "//:gpr_platform",
-        "//:grpc",
-    ],
+    external_deps = ["absl/status:statusor"],
+    deps = ["//:gpr_platform"],
 )
 
 grpc_cc_library(
