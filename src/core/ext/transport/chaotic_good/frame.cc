@@ -299,7 +299,7 @@ absl::Status ServerFragmentFrame::Deserialize(HPackParser* parser,
     auto r = deserializer.ReceivePadding();
     if (!r.ok()) return r.status();
   }
-  // Flag: HAS_HEADER.
+  // Flag: HAS_TRAILERS.
   if (flags & 0x08) {
     auto r = ReadMetadata<ServerMetadata>(
         parser, deserializer.ReceiveTrailers(), header.stream_id, false, false);
