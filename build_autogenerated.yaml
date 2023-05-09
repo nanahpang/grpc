@@ -7383,16 +7383,12 @@ targets:
   language: c++
   headers:
   - src/core/ext/transport/chaotic_good/frame_header.h
-  - src/core/lib/gpr/useful.h
-  - src/core/lib/gprpp/bitset.h
   src:
   - src/core/ext/transport/chaotic_good/frame_header.cc
   - test/core/transport/chaotic_good/frame_header_test.cc
   deps:
   - absl/status:status
   - absl/status:statusor
-  - absl/strings:strings
-  - absl/types:variant
 - name: frame_test
   gtest: true
   build: test
