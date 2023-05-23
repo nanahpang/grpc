@@ -1527,6 +1527,7 @@ libs:
   - src/core/lib/experiments/config.cc
   - src/core/lib/experiments/experiments.cc
   - src/core/lib/gprpp/load_file.cc
+  - src/core/lib/gprpp/per_cpu.cc
   - src/core/lib/gprpp/status_helper.cc
   - src/core/lib/gprpp/time.cc
   - src/core/lib/gprpp/time_averaged_stats.cc
@@ -1953,7 +1954,6 @@ libs:
   - src/core/ext/filters/client_channel/lb_policy/oob_backend_metric.h
   - src/core/ext/filters/client_channel/lb_policy/oob_backend_metric_internal.h
   - src/core/ext/filters/client_channel/lb_policy/outlier_detection/outlier_detection.h
-  - src/core/ext/filters/client_channel/lb_policy/ring_hash/ring_hash.h
   - src/core/ext/filters/client_channel/lb_policy/subchannel_list.h
   - src/core/ext/filters/client_channel/lb_policy/weighted_round_robin/static_stride_scheduler.h
   - src/core/ext/filters/client_channel/local_subchannel_pool.h
@@ -2332,7 +2332,6 @@ libs:
   - src/core/tsi/transport_security.h
   - src/core/tsi/transport_security_grpc.h
   - src/core/tsi/transport_security_interface.h
-  - third_party/xxhash/xxhash.h
   src:
   - src/core/ext/filters/backend_metrics/backend_metric_filter.cc
   - src/core/ext/filters/census/grpc_context.cc
@@ -2362,7 +2361,6 @@ libs:
   - src/core/ext/filters/client_channel/lb_policy/outlier_detection/outlier_detection.cc
   - src/core/ext/filters/client_channel/lb_policy/pick_first/pick_first.cc
   - src/core/ext/filters/client_channel/lb_policy/priority/priority.cc
-  - src/core/ext/filters/client_channel/lb_policy/ring_hash/ring_hash.cc
   - src/core/ext/filters/client_channel/lb_policy/rls/rls.cc
   - src/core/ext/filters/client_channel/lb_policy/round_robin/round_robin.cc
   - src/core/ext/filters/client_channel/lb_policy/weighted_round_robin/static_stride_scheduler.cc
@@ -2517,6 +2515,7 @@ libs:
   - src/core/lib/experiments/config.cc
   - src/core/lib/experiments/experiments.cc
   - src/core/lib/gprpp/load_file.cc
+  - src/core/lib/gprpp/per_cpu.cc
   - src/core/lib/gprpp/status_helper.cc
   - src/core/lib/gprpp/time.cc
   - src/core/lib/gprpp/time_averaged_stats.cc
@@ -3894,6 +3893,7 @@ libs:
   - src/core/lib/experiments/config.cc
   - src/core/lib/experiments/experiments.cc
   - src/core/lib/gprpp/load_file.cc
+  - src/core/lib/gprpp/per_cpu.cc
   - src/core/lib/gprpp/status_helper.cc
   - src/core/lib/gprpp/time.cc
   - src/core/lib/gprpp/time_averaged_stats.cc
@@ -7815,6 +7815,7 @@ targets:
   - src/core/lib/experiments/config.cc
   - src/core/lib/experiments/experiments.cc
   - src/core/lib/gprpp/load_file.cc
+  - src/core/lib/gprpp/per_cpu.cc
   - src/core/lib/gprpp/status_helper.cc
   - src/core/lib/gprpp/time.cc
   - src/core/lib/gprpp/time_averaged_stats.cc
