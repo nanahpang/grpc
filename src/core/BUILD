@@ -5830,6 +5830,7 @@ grpc_cc_library(
     deps = [
         "chaotic_good_frame",
         "for_each",
+        "grpc_promise_endpoint",
         "match",
         "//:gpr_platform",
         "//:grpc_base",
