@@ -77,3 +77,21 @@ grpc_fuzzer(
         "//test/core/promise:test_context",
     ],
 )
+
+grpc_cc_test(
+    name = "client_transport_test",
+    srcs = ["client_transport_test.cc"],
+    external_deps = [
+        "gtest",
+    ],
+    language = "C++",
+    deps = [
+        "//:grpc",
+        "//src/core:activity",
+        "//src/core:chaotic_good_client_transport",
+        "//src/core:grpc_promise_endpoint",
+        "//src/core:join",
+        "//src/core:seq",
+        "//test/core/promise:test_wakeup_schedulers",
+    ],
+)

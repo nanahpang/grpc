@@ -5832,6 +5832,7 @@ grpc_cc_library(
         "for_each",
         "grpc_promise_endpoint",
         "match",
+        "mpsc",
         "//:gpr_platform",
         "//:grpc_base",
         "//:promise",
