@@ -34,9 +34,9 @@ class ClientTransport {
     ClientFragmentFrame initial_frame;
     initial_frame.headers = std::move(call_args.client_initial_metadata);
     initial_frame.end_of_stream = false;
-    auto next_message = call_args.client_to_server_messages->Next();
+    auto initial_message = call_args.client_to_server_messages->Next();
     if (next_message.has_value()) {
-      initial_frame.message = std::move(next_message);
+      initial_frame.message = std::move(initial_message);
       initial_frame.end_of_stream = false;
     } else {
       initial_frame.end_of_stream = true;
@@ -47,11 +47,8 @@ class ClientTransport {
     }
     bool reached_end_of_stream = initial_frame.end_of_stream;
     uint32_t stream_id = initial_frame.stream_id;
-    return TryConcurrently(
-              // TODO(ladynana): Add read path here.
-              Never<ServerMetadataHandle>())
-        .Push(
-            Seq(outgoing_frames_.Push(std::move(initial_frame)),
+    // TODO(ladynana): Add read path here.
+    return Seq(outgoing_frames_.Push(std::move(initial_frame)),
                 If(reached_end_of_stream, ImmediateOkStatus(),
                   ForEach(std::move(*call_args.client_to_server_messages),
                           [stream_id, this](NextResult<MessageHandle> message) {
@@ -64,7 +61,7 @@ class ClientTransport {
                               frame.end_of_stream = true;
                             }
                             return outgoing_frames_.Push(std::move(frame));
-                          }))));
+                          })));
   }
 
  private:

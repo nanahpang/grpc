@@ -33,9 +33,12 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args, PromiseEndpoin
   writer_ = MakeActivity(
       ForEach(outgoing_frames_,
               [hpack_compressor, control_endpoint, data_endpoint](ClientFrame frame) {
-                auto write_buffer = frame.Serialize(hpack_compressor);
-                // TODO(ladynana) split write buffer and write with correct endpoint.
-                return control_endpoint->Write(std::move(write_buffer));
+                auto control_buffer = frame.Serialize(hpack_compressor);
+                auto frame_header = FrameHeader::Parse(grpc_slice_to_c_string(control_buffer.slices[0]));
+                uint8_t message_padding_size = frame_header.message_padding;
+                // TODO(ladynana): Construct message_padding + message to slice buffer;
+                SliceBuffer data_buffer; 
+                return Seq(control_endpoint->Write(std::move(control_write_buffer)), data_endpoint->Write(std::move(data_buffer)));
               }),
       EventEngineWakeupScheduler(), [] {
         // TODO(ladynana): Figure this out
