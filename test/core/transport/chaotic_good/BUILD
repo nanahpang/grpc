@@ -82,16 +82,19 @@ grpc_cc_test(
     name = "client_transport_test",
     srcs = ["client_transport_test.cc"],
     external_deps = [
+        "absl/functional:any_invocable",
         "gtest",
     ],
     language = "C++",
     deps = [
         "//:grpc",
         "//src/core:activity",
+        "//src/core:basic_join",
         "//src/core:chaotic_good_client_transport",
-        "//src/core:grpc_promise_endpoint",
         "//src/core:join",
         "//src/core:seq",
+        "//src/core:slice",
+        "//src/core:slice_buffer",
         "//test/core/promise:test_wakeup_schedulers",
     ],
 )

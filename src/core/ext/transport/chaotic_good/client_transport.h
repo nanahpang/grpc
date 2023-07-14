@@ -12,31 +12,50 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef GRPC_CORE_EXT_TRANSPORT_CHAOTIC_GOOD_CLIENT_TRANSPORT_H
-#define GRPC_CORE_EXT_TRANSPORT_CHAOTIC_GOOD_CLIENT_TRANSPORT_H
+#ifndef GRPC_SRC_CORE_EXT_TRANSPORT_CHAOTIC_GOOD_CLIENT_TRANSPORT_H
+#define GRPC_SRC_CORE_EXT_TRANSPORT_CHAOTIC_GOOD_CLIENT_TRANSPORT_H
 
 #include <grpc/support/port_platform.h>
 
+#include <stdint.h>
+
+#include <initializer_list>
+#include <memory>
+#include <utility>
+
+#include "absl/base/thread_annotations.h"
+#include "absl/status/status.h"
+
 #include "src/core/ext/transport/chaotic_good/frame.h"
+#include "src/core/lib/channel/channel_args.h"
+#include "src/core/lib/gprpp/sync.h"
+#include "src/core/lib/promise/activity.h"
+#include "src/core/lib/promise/for_each.h"
+#include "src/core/lib/promise/mpsc.h"
+#include "src/core/lib/promise/pipe.h"
+#include "src/core/lib/promise/poll.h"
+#include "src/core/lib/promise/seq.h"
 #include "src/core/lib/transport/promise_endpoint.h"
 #include "src/core/lib/transport/transport.h"
-#include "src/core/lib/promise/mpsc.h"
 
 namespace grpc_core {
 namespace chaotic_good {
 
 class ClientTransport {
  public:
-  explicit ClientTransport(const ChannelArgs& channel_args, PromiseEndpoint control_endpoint_, PromiseEndpoint data_endpoint_);
+  ClientTransport(const ChannelArgs& channel_args,
+                  PromiseEndpoint control_endpoint_,
+                  PromiseEndpoint data_endpoint_);
   auto AddStream(CallArgs call_args) {
-    // At this point, the connection is set up. 
-    // Start sending data frames. 
+    // At this point, the connection is set up.
+    // Start sending data frames.
     ClientFragmentFrame initial_frame;
     initial_frame.headers = std::move(call_args.client_initial_metadata);
     initial_frame.end_of_stream = false;
-    auto initial_message = call_args.client_to_server_messages->Next();
-    if (next_message.has_value()) {
-      initial_frame.message = std::move(initial_message);
+    auto next_message = call_args.client_to_server_messages->Next()();
+    auto message = std::move(next_message.value());
+    if (message.has_value()) {
+      initial_frame.message = std::move(message.value());
       initial_frame.end_of_stream = false;
     } else {
       initial_frame.end_of_stream = true;
@@ -45,27 +64,29 @@ class ClientTransport {
       MutexLock lock(&mu_);
       initial_frame.stream_id = next_stream_id_++;
     }
-    bool reached_end_of_stream = initial_frame.end_of_stream;
     uint32_t stream_id = initial_frame.stream_id;
-    // TODO(ladynana): Add read path here.
-    return Seq(outgoing_frames_.Push(std::move(initial_frame)),
-                If(reached_end_of_stream, ImmediateOkStatus(),
-                  ForEach(std::move(*call_args.client_to_server_messages),
-                          [stream_id, this](NextResult<MessageHandle> message) {
-                            ClientFragmentFrame frame;
-                            frame.stream_id = stream_id;
-                            if (message.has_value()) {
-                              frame.message = std::move(message);
-                              frame.end_of_stream = false;
-                            } else {
-                              frame.end_of_stream = true;
-                            }
-                            return outgoing_frames_.Push(std::move(frame));
-                          })));
+    MpscSender<ClientFrame> outgoing_frames = outgoing_frames_.MakeSender();
+    outgoing_frames.Send(std::move(initial_frame));
+    // bool reached_end_of_stream = initial_frame.end_of_stream;
+    return ForEach(std::move(*call_args.client_to_server_messages),
+                   [stream_id, this](MessageHandle message) {
+                     ClientFragmentFrame frame;
+                     frame.stream_id = stream_id;
+                     if (message != nullptr) {
+                       frame.message = std::move(message);
+                       frame.end_of_stream = false;
+                     } else {
+                       frame.end_of_stream = true;
+                     }
+                     MpscSender<ClientFrame> outgoing_frames =
+                         this->outgoing_frames_.MakeSender();
+                     outgoing_frames.Send(std::move(frame));
+                     return absl::OkStatus();
+                   });
   }
 
  private:
-  MpscReceiver<ClientFrame> outgoing_frames_;
+  MpscReceiver<ClientFrame> outgoing_frames_ = MpscReceiver<ClientFrame>(1);
   Mutex mu_;
   uint32_t next_stream_id_ ABSL_GUARDED_BY(mu_) = 1;
   ActivityPtr writer_;
@@ -75,4 +96,4 @@ class ClientTransport {
 }  // namespace chaotic_good
 }  // namespace grpc_core
 
-#endif  // GRPC_CORE_EXT_TRANSPORT_CHAOTIC_GOOD_CLIENT_TRANSPORT_H
+#endif  // GRPC_SRC_CORE_EXT_TRANSPORT_CHAOTIC_GOOD_CLIENT_TRANSPORT_H

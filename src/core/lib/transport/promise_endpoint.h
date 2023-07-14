@@ -49,7 +49,14 @@ class PromiseEndpoint {
   PromiseEndpoint(
       std::unique_ptr<grpc_event_engine::experimental::EventEngine::Endpoint>
           endpoint,
-      SliceBuffer already_received);
+      SliceBuffer already_received)
+      : endpoint_(std::move(endpoint)) {
+    GPR_ASSERT(endpoint_ != nullptr);
+    // TODO(ladynana): Replace this with `SliceBufferCast<>` when it is
+    // available.
+    grpc_slice_buffer_swap(read_buffer_.c_slice_buffer(),
+                           already_received.c_slice_buffer());
+  }
   ~PromiseEndpoint();
 
   // Returns a promise that resolves to a `absl::Status` indicating the result

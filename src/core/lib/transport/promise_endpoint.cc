@@ -18,32 +18,17 @@
 
 #include <functional>
 #include <memory>
-#include <utility>
 
 #include "absl/status/status.h"
 #include "absl/types/optional.h"
 
 #include <grpc/event_engine/event_engine.h>
 #include <grpc/event_engine/slice_buffer.h>
-#include <grpc/slice_buffer.h>
 #include <grpc/support/log.h>
 
 #include "src/core/lib/gprpp/sync.h"
-#include "src/core/lib/slice/slice_buffer.h"
 
 namespace grpc_core {
-
-PromiseEndpoint::PromiseEndpoint(
-    std::unique_ptr<grpc_event_engine::experimental::EventEngine::Endpoint>
-        endpoint,
-    SliceBuffer already_received)
-    : endpoint_(std::move(endpoint)) {
-  GPR_ASSERT(endpoint_ != nullptr);
-  // TODO(ladynana): Replace this with `SliceBufferCast<>` when it is
-  // available.
-  grpc_slice_buffer_swap(read_buffer_.c_slice_buffer(),
-                         already_received.c_slice_buffer());
-}
 
 PromiseEndpoint::~PromiseEndpoint() {
   // Last write result has not been polled.

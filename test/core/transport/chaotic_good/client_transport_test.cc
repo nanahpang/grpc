@@ -48,17 +48,14 @@ using testing::WithArg;
 using testing::WithArgs;
 
 namespace grpc_core {
-namespace chaotic_good{
+namespace chaotic_good {
 namespace testing {
 
-class MockPromiseEndpoint
-    : public grpc_core::PromiseEndpoint {
+class MockPromiseEndpoint : public PromiseEndpoint {
  public:
-  MOCK_METHOD(
-      ArenaPromise<absl::StatusOr<SliceBuffer>>, Read, (size_t num_bytes), ());
-
-  MOCK_METHOD(
-      ArenaPromise<absl::Status>, Write, (SliceBuffer data), ());
+  MOCK_METHOD(ArenaPromise<absl::StatusOr<SliceBuffer>>, Read,
+              (size_t num_bytes), ());
+  MOCK_METHOD(ArenaPromise<absl::Status>, Write, (SliceBuffer data), ());
 };
 
 class MockActivity : public Activity, public Wakeable {
@@ -94,7 +91,8 @@ class ClientTransportTest : public ::testing::Test {
   ClientTransportTest()
       : mock_control_endpoint_(StrictMock<MockPromiseEndpoint>()),
         mock_data_endpoint_(StrictMock<MockPromiseEndpoint>()),
-        client_transport_(channel_args, mock_control_endpoint_, mock_data_endpoint_) {}
+        client_transport_(channel_args, mock_control_endpoint_,
+                          mock_data_endpoint_) {}
 
  protected:
   ChannelArgs channel_args_;
