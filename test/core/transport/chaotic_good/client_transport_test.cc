@@ -91,7 +91,7 @@ class ClientTransportTest : public ::testing::Test {
   ClientTransportTest()
       : mock_control_endpoint_(StrictMock<MockPromiseEndpoint>()),
         mock_data_endpoint_(StrictMock<MockPromiseEndpoint>()),
-        client_transport_(channel_args, mock_control_endpoint_,
+        client_transport_(channel_args_, mock_control_endpoint_,
                           mock_data_endpoint_) {}
 
  protected:
