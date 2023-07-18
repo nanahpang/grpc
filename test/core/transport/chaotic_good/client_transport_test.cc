@@ -16,6 +16,9 @@
 
 // IWYU pragma: no_include <sys/socket.h>
 
+#include <stddef.h>
+
+#include <iostream>
 #include <memory>
 #include <string>
 
@@ -24,13 +27,17 @@
 #include "gtest/gtest.h"
 
 #include <grpc/event_engine/event_engine.h>
+#include <grpc/event_engine/memory_allocator.h>
 #include <grpc/event_engine/port.h>  // IWYU pragma: keep
 #include <grpc/event_engine/slice_buffer.h>
 #include <grpc/grpc.h>
 
-#include "src/core/lib/resource_quota/arena.h"
-#include "src/core/lib/resource_quota/resource_quota.h"
+#include "src/core/lib/gprpp/ref_counted_ptr.h"
 #include "src/core/lib/promise/activity.h"
+#include "src/core/lib/resource_quota/arena.h"
+#include "src/core/lib/resource_quota/memory_quota.h"
+#include "src/core/lib/resource_quota/resource_quota.h"
+#include "src/core/lib/slice/slice.h"
 #include "src/core/lib/slice/slice_buffer.h"
 
 using testing::_;
@@ -137,27 +144,28 @@ TEST_F(ClientTransportTest, AddOneStream) {
   ClientMetadataHandle md;
   size_t initial_arena_size = 1024;
   MemoryAllocator memory_allocator =
-          ResourceQuota::Default()->memory_quota()->CreateMemoryAllocator(
-              "test");
-  ScopedArenaPtr arena_{MakeScopedArena(initial_arena_size,
-                                        &memory_allocator)};
+      ResourceQuota::Default()->memory_quota()->CreateMemoryAllocator("test");
+  ScopedArenaPtr arena_{MakeScopedArena(initial_arena_size, &memory_allocator)};
   Pipe<MessageHandle> pipe_client_to_server_messages_{arena_.get()};
   SliceBuffer buffer;
   buffer.Append(Slice::FromCopiedString("test add stream."));
   auto message = arena_->MakePooled<Message>(std::move(buffer), 0);
-  std::cout<< "send message " << message->payload()->JoinIntoString();
+  std::cout << "send message " << message->payload()->JoinIntoString();
   auto push = pipe_client_to_server_messages_.sender.Push(std::move(message));
-//   auto push_result = push();
-//   EXPECT_TRUE(push_result.value());
-//   auto next_message = pipe_client_to_server_messages_.receiver.Next()();
-//   auto received_message = next_message();
-//   std::cout<< "\nnext message " << next_message().value().value()->payload()->JoinIntoString();
-//   EXPECT_EQ(next_message().value(), message);
-//   CallArgs args = CallArgs{std::move(md), ClientInitialMetadataOutstandingToken::Empty(),
-//                nullptr, nullptr, &pipe_client_to_server_messages_.receiver, nullptr};
-//   client_transport_.AddStream(std::move(args));
-//   auto poll = call_promise();
-//   ASSERT_TRUE(poll.ready());
+  //   auto push_result = push();
+  //   EXPECT_TRUE(push_result.value());
+  //   auto next_message = pipe_client_to_server_messages_.receiver.Next()();
+  //   auto received_message = next_message();
+  //   std::cout<< "\nnext message " <<
+  //   next_message().value().value()->payload()->JoinIntoString();
+  //   EXPECT_EQ(next_message().value(), message);
+  //   CallArgs args = CallArgs{std::move(md),
+  //   ClientInitialMetadataOutstandingToken::Empty(),
+  //                nullptr, nullptr, &pipe_client_to_server_messages_.receiver,
+  //                nullptr};
+  //   client_transport_.AddStream(std::move(args));
+  //   auto poll = call_promise();
+  //   ASSERT_TRUE(poll.ready());
   activity.Deactivate();
 }
 
