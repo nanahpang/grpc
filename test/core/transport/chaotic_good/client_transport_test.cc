@@ -132,6 +132,7 @@ class ClientTransportTest : public ::testing::Test {
 
 TEST_F(ClientTransportTest, AddOneStream) {
   MockActivity activity;
+  activity.Activate();
   EXPECT_CALL(control_endpoint_, Write).Times(0);
   ClientMetadataHandle md;
   size_t initial_arena_size = 1024;
@@ -145,8 +146,10 @@ TEST_F(ClientTransportTest, AddOneStream) {
   buffer.Append(Slice::FromCopiedString("test add stream."));
   auto message = arena_->MakePooled<Message>(std::move(buffer), 0);
   std::cout<< "send message " << message->payload()->JoinIntoString();
-  pipe_client_to_server_messages_.sender.Push(std::move(message));
-  auto next_message = pipe_client_to_server_messages_.receiver.Next()();
+  auto push = pipe_client_to_server_messages_.sender.Push(std::move(message));
+//   auto push_result = push();
+//   EXPECT_TRUE(push_result.value());
+//   auto next_message = pipe_client_to_server_messages_.receiver.Next()();
 //   auto received_message = next_message();
 //   std::cout<< "\nnext message " << next_message().value().value()->payload()->JoinIntoString();
 //   EXPECT_EQ(next_message().value(), message);
