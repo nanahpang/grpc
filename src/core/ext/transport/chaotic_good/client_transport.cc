@@ -47,7 +47,7 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
                                  PromiseEndpoint data_endpoint) {
   HPackCompressor hpack_compressor;
   writer_ = MakeActivity(
-      Loop([this, &hpack_compressor, &control_endpoint, &data_endpoint](){
+      Loop([this, &hpack_compressor, &control_endpoint, &data_endpoint]() {
         return Seq(this->outgoing_frames_.Next(), [&hpack_compressor,
                                                    &control_endpoint,
                                                    &data_endpoint](
@@ -90,7 +90,7 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
       }),
       EventEngineWakeupScheduler(
           grpc_event_engine::experimental::CreateEventEngine()),
-      [](absl::Status status)->absl::Status { return status; });
+      [](absl::Status status) -> absl::Status { return status; });
 }
 
 }  // namespace chaotic_good
