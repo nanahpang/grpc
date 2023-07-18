@@ -31,10 +31,15 @@
 #include "src/core/lib/gprpp/sync.h"
 #include "src/core/lib/promise/activity.h"
 #include "src/core/lib/promise/for_each.h"
+#include "src/core/lib/promise/if.h"
+#include "src/core/lib/promise/loop.h"
 #include "src/core/lib/promise/mpsc.h"
 #include "src/core/lib/promise/pipe.h"
 #include "src/core/lib/promise/poll.h"
 #include "src/core/lib/promise/seq.h"
+#include "src/core/lib/promise/detail/basic_join.h"
+#include "src/core/lib/promise/join.h"
+#include "src/core/lib/promise/map.h"
 #include "src/core/lib/transport/promise_endpoint.h"
 #include "src/core/lib/transport/transport.h"
 
@@ -52,38 +57,36 @@ class ClientTransport {
     ClientFragmentFrame initial_frame;
     initial_frame.headers = std::move(call_args.client_initial_metadata);
     initial_frame.end_of_stream = false;
-    auto next_message = call_args.client_to_server_messages->Next()();
-    auto message = std::move(next_message.value());
-    if (message.has_value()) {
-      initial_frame.message = std::move(message.value());
-      initial_frame.end_of_stream = false;
-    } else {
-      initial_frame.end_of_stream = true;
-    }
     {
       MutexLock lock(&mu_);
       initial_frame.stream_id = next_stream_id_++;
     }
     uint32_t stream_id = initial_frame.stream_id;
-    MpscSender<FrameInterface*> outgoing_frames = outgoing_frames_.MakeSender();
+    MpscSender<FrameInterface*> outgoing_frames = this->outgoing_frames_.MakeSender();
     outgoing_frames.Send(dynamic_cast<FrameInterface*>(&initial_frame));
-    // bool reached_end_of_stream = initial_frame.end_of_stream;
-    return ForEach(
-        std::move(*call_args.client_to_server_messages),
-        [stream_id, this](MessageHandle message) {
-          ClientFragmentFrame frame;
-          frame.stream_id = stream_id;
-          if (message != nullptr) {
-            frame.message = std::move(message);
-            frame.end_of_stream = false;
-          } else {
-            frame.end_of_stream = true;
-          }
-          MpscSender<FrameInterface*> outgoing_frames =
-              this->outgoing_frames_.MakeSender();
-          outgoing_frames.Send(dynamic_cast<FrameInterface*>(&frame));
-          return absl::OkStatus();
-        });
+    return Loop([&call_args, &stream_id, this]()->LoopCtl<absl::Status>{
+      if (call_args.client_to_server_messages != nullptr) {
+        ClientFragmentFrame frame;
+        frame.stream_id = stream_id;
+        MpscSender<FrameInterface*> outgoing_frames =this->outgoing_frames_.MakeSender();
+        auto next_message = call_args.client_to_server_messages->Next()();
+        auto message = std::move(next_message.value());
+        if (message.has_value()) {
+          frame.message = std::move(message.value());
+          frame.end_of_stream = false;
+        } else {
+          frame.end_of_stream = true;
+        }
+        bool reached_end_of_stream = frame.end_of_stream;
+
+       if(reached_end_of_stream){
+        return absl::OkStatus();
+       }
+       outgoing_frames.Send(dynamic_cast<FrameInterface*>(&frame));
+       return Continue();
+      }
+      return absl::OkStatus();
+    });
   }
 
  private:

@@ -5849,6 +5849,8 @@ grpc_cc_library(
         "pipe",
         "poll",
         "seq",
+        "if",
+        "map",
         "slice",
         "slice_buffer",
         "//:gpr",
