@@ -86,15 +86,12 @@ grpc_cc_test(
         "gtest",
     ],
     language = "C++",
+    uses_event_engine = False,
+    uses_polling = False,
     deps = [
         "//:grpc",
         "//src/core:activity",
-        "//src/core:basic_join",
         "//src/core:chaotic_good_client_transport",
-        "//src/core:join",
-        "//src/core:seq",
-        "//src/core:slice",
         "//src/core:slice_buffer",
-        "//test/core/promise:test_wakeup_schedulers",
     ],
 )

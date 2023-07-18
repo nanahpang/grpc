@@ -16,10 +16,8 @@
 
 // IWYU pragma: no_include <sys/socket.h>
 
-#include <cstring>
 #include <memory>
 #include <string>
-#include <tuple>
 
 #include "absl/functional/any_invocable.h"
 #include "gmock/gmock.h"
@@ -28,15 +26,10 @@
 #include <grpc/event_engine/event_engine.h>
 #include <grpc/event_engine/port.h>  // IWYU pragma: keep
 #include <grpc/event_engine/slice_buffer.h>
+#include <grpc/grpc.h>
 
 #include "src/core/lib/promise/activity.h"
-#include "src/core/lib/promise/detail/basic_join.h"
-#include "src/core/lib/promise/join.h"
-#include "src/core/lib/promise/seq.h"
-#include "src/core/lib/slice/slice.h"
 #include "src/core/lib/slice/slice_buffer.h"
-#include "src/core/lib/slice/slice_internal.h"
-#include "test/core/promise/test_wakeup_schedulers.h"
 
 using testing::_;
 using testing::MockFunction;
@@ -51,11 +44,31 @@ namespace grpc_core {
 namespace chaotic_good {
 namespace testing {
 
-class MockPromiseEndpoint : public PromiseEndpoint {
+class MockEndpoint
+    : public grpc_event_engine::experimental::EventEngine::Endpoint {
  public:
-  MOCK_METHOD(ArenaPromise<absl::StatusOr<SliceBuffer>>, Read,
-              (size_t num_bytes), ());
-  MOCK_METHOD(ArenaPromise<absl::Status>, Write, (SliceBuffer data), ());
+  MOCK_METHOD(
+      bool, Read,
+      (absl::AnyInvocable<void(absl::Status)> on_read,
+       grpc_event_engine::experimental::SliceBuffer* buffer,
+       const grpc_event_engine::experimental::EventEngine::Endpoint::ReadArgs*
+           args),
+      (override));
+
+  MOCK_METHOD(
+      bool, Write,
+      (absl::AnyInvocable<void(absl::Status)> on_writable,
+       grpc_event_engine::experimental::SliceBuffer* data,
+       const grpc_event_engine::experimental::EventEngine::Endpoint::WriteArgs*
+           args),
+      (override));
+
+  MOCK_METHOD(
+      const grpc_event_engine::experimental::EventEngine::ResolvedAddress&,
+      GetPeerAddress, (), (const, override));
+  MOCK_METHOD(
+      const grpc_event_engine::experimental::EventEngine::ResolvedAddress&,
+      GetLocalAddress, (), (const, override));
 };
 
 class MockActivity : public Activity, public Wakeable {
@@ -89,20 +102,35 @@ class MockActivity : public Activity, public Wakeable {
 class ClientTransportTest : public ::testing::Test {
  public:
   ClientTransportTest()
-      : mock_control_endpoint_(StrictMock<MockPromiseEndpoint>()),
-        mock_data_endpoint_(StrictMock<MockPromiseEndpoint>()),
-        client_transport_(channel_args, mock_control_endpoint_,
-                          mock_data_endpoint_) {}
+      : channel_args_(ChannelArgs()),
+        control_endpoint_ptr_(new StrictMock<MockEndpoint>()),
+        data_endpoint_ptr_(new StrictMock<MockEndpoint>()),
+        control_endpoint_(*control_endpoint_ptr_),
+        data_endpoint_(*data_endpoint_ptr_),
+        control_promise_endpoint_(
+            std::unique_ptr<MockEndpoint>(control_endpoint_ptr_),
+            SliceBuffer()),
+        data_promise_endpoint_(
+            std::unique_ptr<MockEndpoint>(data_endpoint_ptr_), SliceBuffer()),
+        client_transport_(channel_args_, control_promise_endpoint_,
+                          data_promise_endpoint_) {}
+
+ private:
+  const ChannelArgs channel_args_;
+  MockEndpoint* control_endpoint_ptr_;
+  MockEndpoint* data_endpoint_ptr_;
 
  protected:
-  ChannelArgs channel_args_;
-  MockPromiseEndpoint& mock_control_endpoint_;
-  MockPromiseEndpoint& mock_data_endpoint_;
+  MockEndpoint& control_endpoint_;
+  MockEndpoint& data_endpoint_;
+  PromiseEndpoint control_promise_endpoint_;
+  PromiseEndpoint data_promise_endpoint_;
   ClientTransport client_transport_;
 };
 
 TEST_F(ClientTransportTest, AddOneStream) {
   MockActivity activity;
+  EXPECT_CALL(control_endpoint_, Read).Times(0);
   activity.Deactivate();
 }
 
@@ -112,5 +140,9 @@ TEST_F(ClientTransportTest, AddOneStream) {
 
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
+  // Must call to create default EventEngine.
+  grpc_init();
+  int ret = RUN_ALL_TESTS();
+  grpc_shutdown();
+  return ret;
 }

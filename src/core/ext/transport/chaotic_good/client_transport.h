@@ -65,28 +65,32 @@ class ClientTransport {
       initial_frame.stream_id = next_stream_id_++;
     }
     uint32_t stream_id = initial_frame.stream_id;
-    MpscSender<ClientFrame> outgoing_frames = outgoing_frames_.MakeSender();
-    outgoing_frames.Send(std::move(initial_frame));
+    MpscSender<FrameInterface*> outgoing_frames = outgoing_frames_.MakeSender();
+    outgoing_frames.Send(dynamic_cast<FrameInterface*>(&initial_frame));
     // bool reached_end_of_stream = initial_frame.end_of_stream;
-    return ForEach(std::move(*call_args.client_to_server_messages),
-                   [stream_id, this](MessageHandle message) {
-                     ClientFragmentFrame frame;
-                     frame.stream_id = stream_id;
-                     if (message != nullptr) {
-                       frame.message = std::move(message);
-                       frame.end_of_stream = false;
-                     } else {
-                       frame.end_of_stream = true;
-                     }
-                     MpscSender<ClientFrame> outgoing_frames =
-                         this->outgoing_frames_.MakeSender();
-                     outgoing_frames.Send(std::move(frame));
-                     return absl::OkStatus();
-                   });
+    return ForEach(
+        std::move(*call_args.client_to_server_messages),
+        [stream_id, this](MessageHandle message) {
+          ClientFragmentFrame frame;
+          frame.stream_id = stream_id;
+          if (message != nullptr) {
+            frame.message = std::move(message);
+            frame.end_of_stream = false;
+          } else {
+            frame.end_of_stream = true;
+          }
+          MpscSender<FrameInterface*> outgoing_frames =
+              this->outgoing_frames_.MakeSender();
+          outgoing_frames.Send(dynamic_cast<FrameInterface*>(&frame));
+          return absl::OkStatus();
+        });
   }
 
  private:
-  MpscReceiver<ClientFrame> outgoing_frames_ = MpscReceiver<ClientFrame>(1);
+  // Max buffer is set to 4, so that for stream writes each time it will queue
+  // at most 2 frames.
+  MpscReceiver<FrameInterface*> outgoing_frames_ =
+      MpscReceiver<FrameInterface*>(4);
   Mutex mu_;
   uint32_t next_stream_id_ ABSL_GUARDED_BY(mu_) = 1;
   ActivityPtr writer_;

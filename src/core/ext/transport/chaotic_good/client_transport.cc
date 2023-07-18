@@ -16,14 +16,27 @@
 
 #include "src/core/ext/transport/chaotic_good/client_transport.h"
 
+#include <string>
+#include <tuple>
+
+#include "absl/status/statusor.h"
+#include "absl/types/variant.h"
+
 #include <grpc/event_engine/event_engine.h>
+#include <grpc/slice.h>
 
 #include "src/core/ext/transport/chaotic_good/frame.h"
-#include "src/core/lib/gprpp/match.h"
+#include "src/core/ext/transport/chaotic_good/frame_header.h"
+#include "src/core/ext/transport/chttp2/transport/hpack_encoder.h"
+#include "src/core/lib/promise/activity.h"
+#include "src/core/lib/promise/detail/basic_join.h"
 #include "src/core/lib/promise/event_engine_wakeup_scheduler.h"
-#include "src/core/lib/promise/for_each.h"
 #include "src/core/lib/promise/join.h"
-#include "src/core/lib/promise/promise.h"
+#include "src/core/lib/promise/loop.h"
+#include "src/core/lib/promise/poll.h"
+#include "src/core/lib/slice/slice.h"
+#include "src/core/lib/slice/slice_buffer.h"
+#include "src/core/lib/slice/slice_internal.h"
 #include "src/core/lib/transport/promise_endpoint.h"
 
 namespace grpc_core {
@@ -34,46 +47,50 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
                                  PromiseEndpoint data_endpoint) {
   HPackCompressor hpack_compressor;
   writer_ = MakeActivity(
-      ForEach(std::move(outgoing_frames_),
-              [&hpack_compressor, &control_endpoint,
-               &data_endpoint](ClientFrame frame) {
-                Match(
-                    frame,
-                    // ClientFragmentFrame.
-                    [&hpack_compressor, &control_endpoint,
-                     &data_endpoint](ClientFragmentFrame frame) {
-                      auto control_endpoint_buffer =
-                          frame.Serialize(&hpack_compressor);
-                      auto frame_header =
-                          FrameHeader::Parse(reinterpret_cast<const uint8_t*>(
-                              grpc_slice_to_c_string(
-                                  control_endpoint_buffer.c_slice_buffer()
-                                      ->slices[0])));
-                      // TODO(ladynana): calculate message_padding from
-                      // accumulated write bytes on data endpoint.
-                      uint8_t message_padding_size =
-                          frame_header.value().message_padding;
-                      std::string message_padding(message_padding_size, '0');
-                      Slice slice(grpc_slice_from_cpp_string(message_padding));
-                      SliceBuffer data_endpoint_buffer;
-                      data_endpoint_buffer.Append(std::move(slice));
-                      return Join(control_endpoint.Write(
-                                      std::move(control_endpoint_buffer)),
-                                  data_endpoint.Write(SliceBuffer()));
-                    },
-                    // CancelFrame.
-                    [&hpack_compressor, &control_endpoint](CancelFrame frame) {
-                      auto control_endpoint_buffer =
-                          frame.Serialize(&hpack_compressor);
-                      return control_endpoint.Write(
-                          std::move(control_endpoint_buffer));
-                    });
-              }),
+      Loop([this, &hpack_compressor, &control_endpoint, &data_endpoint]() {
+        return Seq(this->outgoing_frames_.Next(), [&hpack_compressor,
+                                                   &control_endpoint,
+                                                   &data_endpoint](
+                                                      FrameInterface* frame) {
+          auto control_endpoint_buffer = frame->Serialize(&hpack_compressor);
+          FrameHeader frame_header =
+              FrameHeader::Parse(
+                  reinterpret_cast<const uint8_t*>(grpc_slice_to_c_string(
+                      control_endpoint_buffer.c_slice_buffer()->slices[0])))
+                  .value();
+          SliceBuffer data_endpoint_buffer;
+          // Handle data endpoint buffer based on the frame type.
+          switch (frame_header.type) {
+            case FrameType::kSettings:
+              // Write Setting frame on data endpoint;
+              break;
+            case FrameType::kFragment: {
+              uint8_t message_padding_size = frame_header.message_padding;
+              std::string message_padding(message_padding_size, '0');
+              Slice slice(grpc_slice_from_cpp_string(message_padding));
+              data_endpoint_buffer.Append(std::move(slice));
+              break;
+            }
+            case FrameType::kCancel:
+              // No data will be sent on data endpoint;
+              break;
+          }
+          return Seq(
+              Join(control_endpoint.Write(std::move(control_endpoint_buffer)),
+                   data_endpoint.Write(std::move(data_endpoint_buffer))),
+              [](std::tuple<absl::StatusOr<SliceBuffer>,
+                            absl::StatusOr<SliceBuffer>>
+                     ret) -> Poll<absl::variant<Continue, absl::Status>> {
+                if (!(std::get<0>(ret).ok() && std::get<1>(ret).ok())) {
+                  return absl::InternalError("Endpoint Write failed.");
+                }
+                return Continue();
+              });
+        });
+      }),
       EventEngineWakeupScheduler(
           grpc_event_engine::experimental::CreateEventEngine()),
-      []() {
-
-      });
+      [](absl::Status status) { return status; });
 }
 
 }  // namespace chaotic_good

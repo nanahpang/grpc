@@ -46,6 +46,9 @@ namespace grpc_core {
 // Wrapper around event engine endpoint that provides a promise like API.
 class PromiseEndpoint {
  public:
+  PromiseEndpoint(const PromiseEndpoint& other) {
+    // Do not copy the endpoint_ field.
+  }
   PromiseEndpoint(
       std::unique_ptr<grpc_event_engine::experimental::EventEngine::Endpoint>
           endpoint,
