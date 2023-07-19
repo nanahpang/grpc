@@ -90,8 +90,13 @@ grpc_cc_test(
     uses_polling = False,
     deps = [
         "//:grpc",
+        "//:ref_counted_ptr",
         "//src/core:activity",
+        "//src/core:arena",
         "//src/core:chaotic_good_client_transport",
+        "//src/core:memory_quota",
+        "//src/core:resource_quota",
+        "//src/core:slice",
         "//src/core:slice_buffer",
     ],
 )

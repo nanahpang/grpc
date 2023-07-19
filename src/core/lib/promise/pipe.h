@@ -20,6 +20,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#include <iostream>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -322,6 +323,7 @@ class Center : public InterceptorList<T> {
     if (grpc_trace_promise_primitives.enabled()) {
       gpr_log(GPR_INFO, "%s", DebugOpString("MarkClosed").c_str());
     }
+    std::cout << "value state: ";
     switch (value_state_) {
       case ValueState::kEmpty:
       case ValueState::kAcked:
@@ -467,6 +469,7 @@ class PipeSender {
   PipeSender& operator=(PipeSender&& other) noexcept = default;
 
   ~PipeSender() {
+    std::cout << "pipe destruct";
     if (center_ != nullptr) center_->MarkClosed();
   }
 

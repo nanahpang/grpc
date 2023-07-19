@@ -28,6 +28,7 @@
 #include <initializer_list>
 #include <memory>
 #include <new>
+#include <ostream>
 #include <string>
 #include <type_traits>
 #include <utility>

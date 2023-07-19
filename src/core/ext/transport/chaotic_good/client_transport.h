@@ -20,7 +20,6 @@
 #include <stdint.h>
 
 #include <initializer_list>
-#include <memory>
 #include <utility>
 
 #include "absl/base/thread_annotations.h"
@@ -30,16 +29,11 @@
 #include "src/core/lib/channel/channel_args.h"
 #include "src/core/lib/gprpp/sync.h"
 #include "src/core/lib/promise/activity.h"
-#include "src/core/lib/promise/for_each.h"
-#include "src/core/lib/promise/if.h"
 #include "src/core/lib/promise/loop.h"
 #include "src/core/lib/promise/mpsc.h"
 #include "src/core/lib/promise/pipe.h"
 #include "src/core/lib/promise/poll.h"
 #include "src/core/lib/promise/seq.h"
-#include "src/core/lib/promise/detail/basic_join.h"
-#include "src/core/lib/promise/join.h"
-#include "src/core/lib/promise/map.h"
 #include "src/core/lib/transport/promise_endpoint.h"
 #include "src/core/lib/transport/transport.h"
 
@@ -62,13 +56,15 @@ class ClientTransport {
       initial_frame.stream_id = next_stream_id_++;
     }
     uint32_t stream_id = initial_frame.stream_id;
-    MpscSender<FrameInterface*> outgoing_frames = this->outgoing_frames_.MakeSender();
+    MpscSender<FrameInterface*> outgoing_frames =
+        this->outgoing_frames_.MakeSender();
     outgoing_frames.Send(dynamic_cast<FrameInterface*>(&initial_frame));
-    return Loop([&call_args, &stream_id, this]()->LoopCtl<absl::Status>{
+    return Loop([&call_args, &stream_id, this]() -> LoopCtl<absl::Status> {
       if (call_args.client_to_server_messages != nullptr) {
         ClientFragmentFrame frame;
         frame.stream_id = stream_id;
-        MpscSender<FrameInterface*> outgoing_frames =this->outgoing_frames_.MakeSender();
+        MpscSender<FrameInterface*> outgoing_frames =
+            this->outgoing_frames_.MakeSender();
         auto next_message = call_args.client_to_server_messages->Next()();
         auto message = std::move(next_message.value());
         if (message.has_value()) {
@@ -78,12 +74,11 @@ class ClientTransport {
           frame.end_of_stream = true;
         }
         bool reached_end_of_stream = frame.end_of_stream;
-
-       if(reached_end_of_stream){
-        return absl::OkStatus();
-       }
-       outgoing_frames.Send(dynamic_cast<FrameInterface*>(&frame));
-       return Continue();
+        if (reached_end_of_stream) {
+          return absl::OkStatus();
+        }
+        outgoing_frames.Send(dynamic_cast<FrameInterface*>(&frame));
+        return Continue();
       }
       return absl::OkStatus();
     });
