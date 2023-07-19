@@ -21,10 +21,10 @@
 
 #include "absl/status/statusor.h"
 #include "absl/types/variant.h"
-#include "frame.h"
 
 #include <grpc/event_engine/event_engine.h>
 #include <grpc/slice.h>
+#include <grpc/support/log.h>
 
 #include "src/core/ext/transport/chaotic_good/frame.h"
 #include "src/core/ext/transport/chaotic_good/frame_header.h"
@@ -71,10 +71,12 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
               Slice slice(grpc_slice_from_cpp_string(message_padding));
               data_endpoint_buffer.Append(std::move(slice));
               uint8_t message_size = frame_header.message_length;
-              auto message = std::move(dynamic_cast<ClientFragmentFrame*>(frame)->message);
+              auto message =
+                  std::move(dynamic_cast<ClientFragmentFrame*>(frame)->message);
               GPR_ASSERT(message_size == message->payload()->Length());
-              message->payload()->MoveFirstNBytesIntoSliceBuffer(message_size, data_endpoint_buffer);
-              std::cout<<"message length " << message_size;
+              message->payload()->MoveFirstNBytesIntoSliceBuffer(
+                  message_size, data_endpoint_buffer);
+              std::cout << "message length " << message_size;
               break;
             }
             case FrameType::kCancel:

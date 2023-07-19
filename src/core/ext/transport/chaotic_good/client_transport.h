@@ -20,6 +20,9 @@
 #include <stdint.h>
 
 #include <initializer_list>
+#include <iostream>
+#include <memory>
+#include <string>
 #include <utility>
 
 #include "absl/base/thread_annotations.h"
@@ -34,6 +37,7 @@
 #include "src/core/lib/promise/pipe.h"
 #include "src/core/lib/promise/poll.h"
 #include "src/core/lib/promise/seq.h"
+#include "src/core/lib/slice/slice_buffer.h"
 #include "src/core/lib/transport/promise_endpoint.h"
 #include "src/core/lib/transport/transport.h"
 
@@ -76,7 +80,8 @@ class ClientTransport {
         if (frame.end_of_stream) {
           return absl::OkStatus();
         }
-        std::cout << "\n send message in Loop: " << frame.message->payload()->JoinIntoString();
+        std::cout << "\n send message in Loop: "
+                  << frame.message->payload()->JoinIntoString();
         outgoing_frames.Send(dynamic_cast<FrameInterface*>(&frame));
         return Continue();
       }

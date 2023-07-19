@@ -114,7 +114,9 @@ class ClientTransportTest : public ::testing::Test {
       : channel_args_(ChannelArgs()),
         control_endpoint_ptr_(new StrictMock<MockEndpoint>()),
         data_endpoint_ptr_(new StrictMock<MockEndpoint>()),
-        memory_allocator_ (ResourceQuota::Default()->memory_quota()->CreateMemoryAllocator("test")),
+        memory_allocator_(
+            ResourceQuota::Default()->memory_quota()->CreateMemoryAllocator(
+                "test")),
         control_endpoint_(*control_endpoint_ptr_),
         data_endpoint_(*data_endpoint_ptr_),
         control_promise_endpoint_(
@@ -125,7 +127,7 @@ class ClientTransportTest : public ::testing::Test {
         client_transport_(channel_args_, control_promise_endpoint_,
                           data_promise_endpoint_),
         arena_(MakeScopedArena(initial_arena_size, &memory_allocator_)),
-        pipe_client_to_server_messages_(arena_.get()){}
+        pipe_client_to_server_messages_(arena_.get()) {}
 
  private:
   const ChannelArgs channel_args_;
