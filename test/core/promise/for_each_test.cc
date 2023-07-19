@@ -18,7 +18,6 @@
 
 #include <initializer_list>
 #include <memory>
-#include <ostream>
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
