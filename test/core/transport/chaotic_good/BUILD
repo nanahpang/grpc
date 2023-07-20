@@ -83,6 +83,7 @@ grpc_cc_test(
     srcs = ["client_transport_test.cc"],
     external_deps = [
         "absl/functional:any_invocable",
+        "absl/time",
         "gtest",
     ],
     language = "C++",

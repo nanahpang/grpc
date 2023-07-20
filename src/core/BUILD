@@ -5804,6 +5804,7 @@ grpc_cc_library(
     deps = [
         "activity",
         "basic_join",
+        "basic_seq",
         "channel_args",
         "chaotic_good_frame",
         "chaotic_good_frame_header",
