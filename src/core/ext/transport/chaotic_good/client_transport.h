@@ -76,7 +76,7 @@ class ClientTransport {
         if (frame.end_of_stream) {
           return absl::OkStatus();
         }
-        std::cout << "\n send message in Loop: " << frame.message->payload()->JoinIntoString();
+        std::cout << "\n push message to outgoing_frame_ size: " << frame.message->payload()->Length();
         outgoing_frames.Send(dynamic_cast<FrameInterface*>(&frame));
         return Continue();
       }

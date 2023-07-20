@@ -48,8 +48,13 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
                                  PromiseEndpoint data_endpoint) {
   HPackCompressor hpack_compressor;
   writer_ = MakeActivity(
-      Loop([this, &hpack_compressor, &control_endpoint, &data_endpoint]() {
-        return Seq(this->outgoing_frames_.Next(), [&hpack_compressor,
+      Loop(Seq([this]{
+        auto next_frame = this->outgoing_frames_.Next();
+        auto frame = next_frame();
+        std::cout << "\n writer_ next frame: " << (frame.pending() ? "pending": dynamic_cast<ClientFragmentFrame*>(frame.value())->message->payload()->JoinIntoString());
+        return frame;
+        }, 
+        [&hpack_compressor,
                                                    &control_endpoint,
                                                    &data_endpoint](
                                                       FrameInterface* frame) {
@@ -59,6 +64,7 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
                   reinterpret_cast<const uint8_t*>(grpc_slice_to_c_string(
                       control_endpoint_buffer.c_slice_buffer()->slices[0])))
                   .value();
+          std::cout << "\n writer_ send next frame.";
           SliceBuffer data_endpoint_buffer;
           // Handle data endpoint buffer based on the frame type.
           switch (frame_header.type) {
@@ -74,7 +80,7 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
               auto message = std::move(dynamic_cast<ClientFragmentFrame*>(frame)->message);
               GPR_ASSERT(message_size == message->payload()->Length());
               message->payload()->MoveFirstNBytesIntoSliceBuffer(message_size, data_endpoint_buffer);
-              std::cout<<"message length " << message_size;
+              std::cout<<"data frame message length " << message_size;
               break;
             }
             case FrameType::kCancel:
@@ -88,12 +94,13 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
                             absl::StatusOr<SliceBuffer>>
                      ret) -> Poll<absl::variant<Continue, absl::Status>> {
                 if (!(std::get<0>(ret).ok() && std::get<1>(ret).ok())) {
+                  // TODO(ladynana): better error handling when writes failed.
                   return absl::InternalError("Endpoint Write failed.");
                 }
                 return Continue();
               });
-        });
-      }),
+        })
+      ),
       EventEngineWakeupScheduler(
           grpc_event_engine::experimental::CreateEventEngine()),
       [](absl::Status status) -> absl::Status { return status; });

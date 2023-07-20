@@ -153,7 +153,7 @@ TEST_F(ClientTransportTest, AddOneStream) {
   SliceBuffer buffer;
   buffer.Append(Slice::FromCopiedString("test add stream."));
   auto message = arena_->MakePooled<Message>(std::move(buffer), 0);
-  std::cout << "\nsend message: " << message->payload()->JoinIntoString();
+  std::cout << "\n application send message size: " << message->payload()->Length();
   auto push = pipe_client_to_server_messages_.sender.Push(std::move(message));
   // push is pending because the receiver has not read the message
   EXPECT_EQ(push(), Poll<bool>(Pending{}));
@@ -166,6 +166,8 @@ TEST_F(ClientTransportTest, AddOneStream) {
   EXPECT_EQ(poll.value(), absl::OkStatus());
   // push is no longer pending because the receiver has read the message
   EXPECT_EQ(push(), Poll<bool>(true));
+  EXPECT_CALL(activity, WakeupRequested);
+  absl::SleepFor(absl::Seconds(2));
   pipe_client_to_server_messages_.sender.Close();
   activity.Deactivate();
   fflush(stdout);
