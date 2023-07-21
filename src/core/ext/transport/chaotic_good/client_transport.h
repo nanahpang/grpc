@@ -57,22 +57,20 @@ class ClientTransport {
       MutexLock lock(&mu_);
       initial_frame.stream_id = next_stream_id_++;
     }
-    auto next_message = call_args.client_to_server_messages->Next()();
-    if (next_message.ready()) {
-      auto message = std::move(next_message.value());
-      if (message.has_value()) {
-        initial_frame.message = std::move(message.value());
-        initial_frame.end_of_stream = false;
-      } else {
-        initial_frame.end_of_stream = true;
-      }
-    }
     const uint32_t stream_id = initial_frame.stream_id;
     bool reach_end_of_stream = initial_frame.end_of_stream;
     MpscSender<FrameInterface*> outgoing_frames =
         this->outgoing_frames_.MakeSender();
-    return Seq(
-        outgoing_frames.Send(&initial_frame),
+    return Seq(call_args.client_to_server_messages->Next(),
+        [&initial_frame, reach_end_of_stream, &outgoing_frames](NextResult<MessageHandle> message) mutable {
+        if (message.has_value()) {
+            initial_frame.message = std::move(message.value());
+            initial_frame.end_of_stream = false;
+        } else {
+            initial_frame.end_of_stream = true;
+        }
+        reach_end_of_stream = initial_frame.end_of_stream;
+        return outgoing_frames.Send(&initial_frame);},
         Loop(Seq(
             [reach_end_of_stream, stream_id, &outgoing_frames,
              &call_args]() mutable {
