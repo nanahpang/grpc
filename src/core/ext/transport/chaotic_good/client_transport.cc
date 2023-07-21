@@ -48,12 +48,7 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
                                  PromiseEndpoint data_endpoint) {
   HPackCompressor hpack_compressor;
   writer_ = MakeActivity(
-      Loop(Seq([this]{
-        auto next_frame = this->outgoing_frames_.Next();
-        auto frame = next_frame();
-        std::cout << "\n writer_ next frame: " << (frame.pending() ? "pending": dynamic_cast<ClientFragmentFrame*>(frame.value())->message->payload()->JoinIntoString());
-        return frame;
-        }, 
+      Loop(Seq(outgoing_frames_.Next(), 
         [&hpack_compressor,
                                                    &control_endpoint,
                                                    &data_endpoint](

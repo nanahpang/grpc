@@ -58,8 +58,8 @@ class ClientTransport {
     uint32_t stream_id = initial_frame.stream_id;
     MpscSender<FrameInterface*> outgoing_frames =
         this->outgoing_frames_.MakeSender();
-    outgoing_frames.Send(dynamic_cast<FrameInterface*>(&initial_frame));
-    return Loop([&call_args, &stream_id, this]() -> LoopCtl<absl::Status> {
+    return Seq(outgoing_frames.Send(dynamic_cast<FrameInterface*>(&initial_frame)),
+    Loop([&call_args, &stream_id, this]() -> LoopCtl<absl::Status> {
       if (call_args.client_to_server_messages != nullptr) {
         ClientFragmentFrame frame;
         frame.stream_id = stream_id;
@@ -81,7 +81,7 @@ class ClientTransport {
         return Continue();
       }
       return absl::OkStatus();
-    });
+    }));
   }
 
  private:
