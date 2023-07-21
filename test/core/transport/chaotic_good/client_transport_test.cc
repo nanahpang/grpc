@@ -159,7 +159,7 @@ TEST_F(ClientTransportTest, AddOneStream) {
   EXPECT_CALL(data_endpoint_, Write).Times(1);
   ClientMetadataHandle md;
   SliceBuffer buffer;
-  buffer.Append(Slice::FromCopiedString("test add stream."));
+  buffer.Append(Slice::FromCopiedString(kBuffer));
   auto message = arena_->MakePooled<Message>(std::move(buffer), 0);
   CallArgs args = CallArgs{
       std::move(md), ClientInitialMetadataOutstandingToken::Empty(), nullptr,
