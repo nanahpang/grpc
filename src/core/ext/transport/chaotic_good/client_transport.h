@@ -31,6 +31,7 @@
 #include "src/core/lib/channel/channel_args.h"
 #include "src/core/lib/gprpp/sync.h"
 #include "src/core/lib/promise/activity.h"
+#include "src/core/lib/promise/detail/basic_seq.h"
 #include "src/core/lib/promise/loop.h"
 #include "src/core/lib/promise/mpsc.h"
 #include "src/core/lib/promise/pipe.h"
@@ -61,16 +62,19 @@ class ClientTransport {
     bool reach_end_of_stream = initial_frame.end_of_stream;
     MpscSender<FrameInterface*> outgoing_frames =
         this->outgoing_frames_.MakeSender();
-    return Seq(call_args.client_to_server_messages->Next(),
-        [&initial_frame, reach_end_of_stream, &outgoing_frames](NextResult<MessageHandle> message) mutable {
-        if (message.has_value()) {
+    return Seq(
+        call_args.client_to_server_messages->Next(),
+        [&initial_frame, reach_end_of_stream,
+         &outgoing_frames](NextResult<MessageHandle> message) mutable {
+          if (message.has_value()) {
             initial_frame.message = std::move(message.value());
             initial_frame.end_of_stream = false;
-        } else {
+          } else {
             initial_frame.end_of_stream = true;
-        }
-        reach_end_of_stream = initial_frame.end_of_stream;
-        return outgoing_frames.Send(&initial_frame);},
+          }
+          reach_end_of_stream = initial_frame.end_of_stream;
+          return outgoing_frames.Send(&initial_frame);
+        },
         Loop(Seq(
             [reach_end_of_stream, stream_id, &outgoing_frames,
              &call_args]() mutable {

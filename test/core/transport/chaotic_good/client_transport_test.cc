@@ -166,9 +166,9 @@ TEST_F(ClientTransportTest, AddOneStream) {
   EXPECT_CALL(on_done, Call(absl::OkStatus()));
   auto activity = MakeActivity(
       Seq(pipe_client_to_server_messages_.sender.Push(std::move(message)),
-              client_transport_.AddStream(std::move(args)),
-              pipe_client_to_server_messages_.receiver.AwaitClosed(),
-              pipe_client_to_server_messages_.sender.AwaitClosed(),
+          client_transport_.AddStream(std::move(args)),
+          pipe_client_to_server_messages_.receiver.AwaitClosed(),
+          pipe_client_to_server_messages_.sender.AwaitClosed(),
           [] { return absl::OkStatus(); }),
       InlineWakeupScheduler(), [&on_done](absl::Status status) {
         std::cout << "\n On done called";
