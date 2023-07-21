@@ -134,8 +134,6 @@ class ClientTransportTest : public ::testing::Test {
         arena_(MakeScopedArena(initial_arena_size, &memory_allocator_)),
         pipe_client_to_server_messages_(arena_.get()) {}
 
-  ~ClientTransportTest() { pipe_client_to_server_messages_.sender.Close(); }
-
  private:
   const ChannelArgs channel_args_;
   MockEndpoint* control_endpoint_ptr_;
@@ -169,6 +167,8 @@ TEST_F(ClientTransportTest, AddOneStream) {
   auto activity = MakeActivity(
       Seq(pipe_client_to_server_messages_.sender.Push(std::move(message)),
               client_transport_.AddStream(std::move(args)),
+              pipe_client_to_server_messages_.receiver.AwaitClosed(),
+              pipe_client_to_server_messages_.sender.AwaitClosed(),
           [] { return absl::OkStatus(); }),
       InlineWakeupScheduler(), [&on_done](absl::Status status) {
         std::cout << "\n On done called";
