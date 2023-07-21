@@ -34,11 +34,14 @@
 
 #include "src/core/lib/gprpp/ref_counted_ptr.h"
 #include "src/core/lib/promise/activity.h"
+#include "src/core/lib/promise/seq.h"
+#include "src/core/lib/promise/join.h"
 #include "src/core/lib/resource_quota/arena.h"
 #include "src/core/lib/resource_quota/memory_quota.h"
 #include "src/core/lib/resource_quota/resource_quota.h"
 #include "src/core/lib/slice/slice.h"
 #include "src/core/lib/slice/slice_buffer.h"
+#include "test/core/promise/test_wakeup_schedulers.h"
 
 using testing::_;
 using testing::MockFunction;
@@ -127,6 +130,9 @@ class ClientTransportTest : public ::testing::Test {
         arena_(MakeScopedArena(initial_arena_size, &memory_allocator_)),
         pipe_client_to_server_messages_(arena_.get()){}
 
+  ~ClientTransportTest(){
+    pipe_client_to_server_messages_.sender.Close();
+  }
  private:
   const ChannelArgs channel_args_;
   MockEndpoint* control_endpoint_ptr_;
@@ -145,31 +151,28 @@ class ClientTransportTest : public ::testing::Test {
 };
 
 TEST_F(ClientTransportTest, AddOneStream) {
-  MockActivity activity;
-  activity.Activate();
-  EXPECT_CALL(control_endpoint_, Write).Times(0);
-  EXPECT_CALL(data_endpoint_, Write).Times(0);
+  const std::string kBuffer = {0x01, 0x02, 0x03, 0x04};
+  EXPECT_CALL(control_endpoint_, Write).Times(1);
+  EXPECT_CALL(data_endpoint_, Write).Times(1);
   ClientMetadataHandle md;
   SliceBuffer buffer;
   buffer.Append(Slice::FromCopiedString("test add stream."));
   auto message = arena_->MakePooled<Message>(std::move(buffer), 0);
-  std::cout << "\n application send message size: " << message->payload()->Length();
-  auto push = pipe_client_to_server_messages_.sender.Push(std::move(message));
-  // push is pending because the receiver has not read the message
-  EXPECT_EQ(push(), Poll<bool>(Pending{}));
   CallArgs args = CallArgs{
       std::move(md), ClientInitialMetadataOutstandingToken::Empty(), nullptr,
       nullptr,       &pipe_client_to_server_messages_.receiver,      nullptr};
-  auto call_promise = client_transport_.AddStream(std::move(args));
-  auto poll = call_promise();
-  ASSERT_TRUE(poll.ready());
-  EXPECT_EQ(poll.value(), absl::OkStatus());
-  // push is no longer pending because the receiver has read the message
-  EXPECT_EQ(push(), Poll<bool>(true));
-  EXPECT_CALL(activity, WakeupRequested);
+  StrictMock<MockFunction<void(absl::Status)>> on_done;
+  EXPECT_CALL(on_done, Call(absl::OkStatus()));
+  auto activity = MakeActivity(
+    Seq(Seq(pipe_client_to_server_messages_.sender.Push(std::move(message)),
+    client_transport_.AddStream(std::move(args))), []{return absl::OkStatus();}),
+    InlineWakeupScheduler(),
+      [&on_done](absl::Status status) { 
+        std::cout << "\n On done called";
+        on_done.Call(std::move(status)); 
+        }
+  );
   absl::SleepFor(absl::Seconds(2));
-  pipe_client_to_server_messages_.sender.Close();
-  activity.Deactivate();
   fflush(stdout);
 }
 
