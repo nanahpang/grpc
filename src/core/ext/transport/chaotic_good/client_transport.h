@@ -20,6 +20,8 @@
 #include <stdint.h>
 
 #include <initializer_list>
+#include <iostream>
+#include <memory>
 #include <utility>
 
 #include "absl/base/thread_annotations.h"
@@ -34,6 +36,7 @@
 #include "src/core/lib/promise/pipe.h"
 #include "src/core/lib/promise/poll.h"
 #include "src/core/lib/promise/seq.h"
+#include "src/core/lib/slice/slice_buffer.h"
 #include "src/core/lib/transport/promise_endpoint.h"
 #include "src/core/lib/transport/transport.h"
 
@@ -58,30 +61,32 @@ class ClientTransport {
     uint32_t stream_id = initial_frame.stream_id;
     MpscSender<FrameInterface*> outgoing_frames =
         this->outgoing_frames_.MakeSender();
-    return Seq(outgoing_frames.Send(dynamic_cast<FrameInterface*>(&initial_frame)),
-    Loop([&call_args, &stream_id, this]() -> LoopCtl<absl::Status> {
-      if (call_args.client_to_server_messages != nullptr) {
-        ClientFragmentFrame frame;
-        frame.stream_id = stream_id;
-        MpscSender<FrameInterface*> outgoing_frames =
-            this->outgoing_frames_.MakeSender();
-        auto next_message = call_args.client_to_server_messages->Next()();
-        auto message = std::move(next_message.value());
-        if (message.has_value()) {
-          frame.message = std::move(message.value());
-          frame.end_of_stream = false;
-        } else {
-          frame.end_of_stream = true;
-        }
-        if (frame.end_of_stream) {
+    return Seq(
+        outgoing_frames.Send(dynamic_cast<FrameInterface*>(&initial_frame)),
+        Loop([&call_args, &stream_id, this]() -> LoopCtl<absl::Status> {
+          if (call_args.client_to_server_messages != nullptr) {
+            ClientFragmentFrame frame;
+            frame.stream_id = stream_id;
+            MpscSender<FrameInterface*> outgoing_frames =
+                this->outgoing_frames_.MakeSender();
+            auto next_message = call_args.client_to_server_messages->Next()();
+            auto message = std::move(next_message.value());
+            if (message.has_value()) {
+              frame.message = std::move(message.value());
+              frame.end_of_stream = false;
+            } else {
+              frame.end_of_stream = true;
+            }
+            if (frame.end_of_stream) {
+              return absl::OkStatus();
+            }
+            std::cout << "\n push message to outgoing_frame_ size: "
+                      << frame.message->payload()->Length();
+            outgoing_frames.Send(dynamic_cast<FrameInterface*>(&frame));
+            return Continue();
+          }
           return absl::OkStatus();
-        }
-        std::cout << "\n push message to outgoing_frame_ size: " << frame.message->payload()->Length();
-        outgoing_frames.Send(dynamic_cast<FrameInterface*>(&frame));
-        return Continue();
-      }
-      return absl::OkStatus();
-    }));
+        }));
   }
 
  private:
