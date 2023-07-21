@@ -167,8 +167,8 @@ TEST_F(ClientTransportTest, AddOneStream) {
   StrictMock<MockFunction<void(absl::Status)>> on_done;
   EXPECT_CALL(on_done, Call(absl::OkStatus()));
   auto activity = MakeActivity(
-      Seq(Seq(pipe_client_to_server_messages_.sender.Push(std::move(message)),
-              client_transport_.AddStream(std::move(args))),
+      Seq(pipe_client_to_server_messages_.sender.Push(std::move(message)),
+              client_transport_.AddStream(std::move(args)),
           [] { return absl::OkStatus(); }),
       InlineWakeupScheduler(), [&on_done](absl::Status status) {
         std::cout << "\n On done called";
