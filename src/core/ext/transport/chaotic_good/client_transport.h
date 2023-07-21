@@ -79,7 +79,6 @@ class ClientTransport {
               // Poll next frame from client_to_server_messages.
               ClientFragmentFrame frame;
               frame.stream_id = stream_id;
-              // This poll should return immediately.
               auto next_message = call_args.client_to_server_messages->Next()();
               if (next_message.ready()) {
                 auto message = std::move(next_message.value());
