@@ -18,8 +18,10 @@
 #include <grpc/support/port_platform.h>
 
 #include <stdint.h>
+#include <stdio.h>
 
 #include <initializer_list>
+#include <iostream>
 #include <utility>
 
 #include "absl/base/thread_annotations.h"
@@ -55,33 +57,51 @@ class ClientTransport {
       MutexLock lock(&mu_);
       initial_frame.stream_id = next_stream_id_++;
     }
-    uint32_t stream_id = initial_frame.stream_id;
+    auto next_message = call_args.client_to_server_messages->Next()();
+    if (next_message.ready()) {
+      auto message = std::move(next_message.value());
+      if (message.has_value()) {
+        initial_frame.message = std::move(message.value());
+        initial_frame.end_of_stream = false;
+      } else {
+        initial_frame.end_of_stream = true;
+      }
+    }
+    const uint32_t stream_id = initial_frame.stream_id;
+    bool reach_end_of_stream = initial_frame.end_of_stream;
     MpscSender<FrameInterface*> outgoing_frames =
         this->outgoing_frames_.MakeSender();
-    return Seq(outgoing_frames.Send(dynamic_cast<FrameInterface*>(&initial_frame)),
-    Loop([&call_args, &stream_id, this]() -> LoopCtl<absl::Status> {
-      if (call_args.client_to_server_messages != nullptr) {
-        ClientFragmentFrame frame;
-        frame.stream_id = stream_id;
-        MpscSender<FrameInterface*> outgoing_frames =
-            this->outgoing_frames_.MakeSender();
-        auto next_message = call_args.client_to_server_messages->Next()();
-        auto message = std::move(next_message.value());
-        if (message.has_value()) {
-          frame.message = std::move(message.value());
-          frame.end_of_stream = false;
-        } else {
-          frame.end_of_stream = true;
-        }
-        if (frame.end_of_stream) {
-          return absl::OkStatus();
-        }
-        std::cout << "\n push message to outgoing_frame_ size: " << frame.message->payload()->Length();
-        outgoing_frames.Send(dynamic_cast<FrameInterface*>(&frame));
-        return Continue();
-      }
-      return absl::OkStatus();
-    }));
+    return Seq(
+        outgoing_frames.Send(&initial_frame),
+        Loop(Seq(
+            [reach_end_of_stream, stream_id, &outgoing_frames,
+             &call_args]() mutable {
+              // Poll next frame from client_to_server_messages.
+              ClientFragmentFrame frame;
+              frame.stream_id = stream_id;
+              // This poll should return immediately.
+              auto next_message = call_args.client_to_server_messages->Next()();
+              if (next_message.ready()) {
+                auto message = std::move(next_message.value());
+                if (message.has_value()) {
+                  frame.message = std::move(message.value());
+                  frame.end_of_stream = false;
+                } else {
+                  frame.end_of_stream = true;
+                }
+              } else {
+                reach_end_of_stream = true;
+              }
+              return outgoing_frames.Send(&frame);
+            },
+            [reach_end_of_stream]() -> LoopCtl<absl::Status> {
+              std::cout << "\n reach end of steram " << reach_end_of_stream;
+              fflush(stdout);
+              if (reach_end_of_stream) {
+                return absl::OkStatus();
+              }
+              return Continue();
+            })));
   }
 
  private:

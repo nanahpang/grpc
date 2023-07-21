@@ -23,6 +23,8 @@
 #include <string>
 
 #include "absl/functional/any_invocable.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -34,8 +36,8 @@
 
 #include "src/core/lib/gprpp/ref_counted_ptr.h"
 #include "src/core/lib/promise/activity.h"
+#include "src/core/lib/promise/detail/basic_seq.h"
 #include "src/core/lib/promise/seq.h"
-#include "src/core/lib/promise/join.h"
 #include "src/core/lib/resource_quota/arena.h"
 #include "src/core/lib/resource_quota/memory_quota.h"
 #include "src/core/lib/resource_quota/resource_quota.h"
@@ -117,7 +119,9 @@ class ClientTransportTest : public ::testing::Test {
       : channel_args_(ChannelArgs()),
         control_endpoint_ptr_(new StrictMock<MockEndpoint>()),
         data_endpoint_ptr_(new StrictMock<MockEndpoint>()),
-        memory_allocator_ (ResourceQuota::Default()->memory_quota()->CreateMemoryAllocator("test")),
+        memory_allocator_(
+            ResourceQuota::Default()->memory_quota()->CreateMemoryAllocator(
+                "test")),
         control_endpoint_(*control_endpoint_ptr_),
         data_endpoint_(*data_endpoint_ptr_),
         control_promise_endpoint_(
@@ -128,11 +132,10 @@ class ClientTransportTest : public ::testing::Test {
         client_transport_(channel_args_, control_promise_endpoint_,
                           data_promise_endpoint_),
         arena_(MakeScopedArena(initial_arena_size, &memory_allocator_)),
-        pipe_client_to_server_messages_(arena_.get()){}
+        pipe_client_to_server_messages_(arena_.get()) {}
 
-  ~ClientTransportTest(){
-    pipe_client_to_server_messages_.sender.Close();
-  }
+  ~ClientTransportTest() { pipe_client_to_server_messages_.sender.Close(); }
+
  private:
   const ChannelArgs channel_args_;
   MockEndpoint* control_endpoint_ptr_;
@@ -164,14 +167,13 @@ TEST_F(ClientTransportTest, AddOneStream) {
   StrictMock<MockFunction<void(absl::Status)>> on_done;
   EXPECT_CALL(on_done, Call(absl::OkStatus()));
   auto activity = MakeActivity(
-    Seq(Seq(pipe_client_to_server_messages_.sender.Push(std::move(message)),
-    client_transport_.AddStream(std::move(args))), []{return absl::OkStatus();}),
-    InlineWakeupScheduler(),
-      [&on_done](absl::Status status) { 
+      Seq(Seq(pipe_client_to_server_messages_.sender.Push(std::move(message)),
+              client_transport_.AddStream(std::move(args))),
+          [] { return absl::OkStatus(); }),
+      InlineWakeupScheduler(), [&on_done](absl::Status status) {
         std::cout << "\n On done called";
-        on_done.Call(std::move(status)); 
-        }
-  );
+        on_done.Call(std::move(status));
+      });
   absl::SleepFor(absl::Seconds(2));
   fflush(stdout);
 }

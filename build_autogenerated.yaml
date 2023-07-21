@@ -6405,6 +6405,7 @@ targets:
   - src/core/lib/promise/mpsc.h
   - src/core/lib/promise/wait_set.h
   - src/core/lib/transport/promise_endpoint.h
+  - test/core/promise/test_wakeup_schedulers.h
   src:
   - src/core/ext/transport/chaotic_good/client_transport.cc
   - src/core/ext/transport/chaotic_good/frame.cc
