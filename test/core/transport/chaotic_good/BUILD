@@ -99,6 +99,7 @@ grpc_cc_test(
         "//src/core:memory_quota",
         "//src/core:resource_quota",
         "//src/core:seq",
+        "//src/core:join",
         "//src/core:slice",
         "//src/core:slice_buffer",
         "//test/core/promise:test_wakeup_schedulers",

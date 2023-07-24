@@ -26,12 +26,14 @@
 
 #include "absl/base/thread_annotations.h"
 #include "absl/status/status.h"
+#include "frame.h"
 
 #include "src/core/ext/transport/chaotic_good/frame.h"
 #include "src/core/lib/channel/channel_args.h"
 #include "src/core/lib/gprpp/sync.h"
 #include "src/core/lib/promise/activity.h"
 #include "src/core/lib/promise/loop.h"
+#include "src/core/lib/promise/join.h"
 #include "src/core/lib/promise/mpsc.h"
 #include "src/core/lib/promise/pipe.h"
 #include "src/core/lib/promise/poll.h"
@@ -59,53 +61,75 @@ class ClientTransport {
     }
     const uint32_t stream_id = initial_frame.stream_id;
     bool reach_end_of_stream = initial_frame.end_of_stream;
-    MpscSender<FrameInterface*> outgoing_frames =
+    MpscSender<ClientFrame> outgoing_frames =
         this->outgoing_frames_.MakeSender();
-    return Seq(call_args.client_to_server_messages->Next(),
-        [&initial_frame, reach_end_of_stream, &outgoing_frames](NextResult<MessageHandle> message) mutable {
-        if (message.has_value()) {
-            initial_frame.message = std::move(message.value());
-            initial_frame.end_of_stream = false;
-        } else {
-            initial_frame.end_of_stream = true;
-        }
-        reach_end_of_stream = initial_frame.end_of_stream;
-        return outgoing_frames.Send(&initial_frame);},
-        Loop(Seq(
-            [reach_end_of_stream, stream_id, &outgoing_frames,
-             &call_args]() mutable {
-              // Poll next frame from client_to_server_messages.
-              ClientFragmentFrame frame;
-              frame.stream_id = stream_id;
-              auto next_message = call_args.client_to_server_messages->Next()();
-              if (next_message.ready()) {
-                auto message = std::move(next_message.value());
-                if (message.has_value()) {
-                  frame.message = std::move(message.value());
-                  frame.end_of_stream = false;
-                } else {
-                  frame.end_of_stream = true;
-                }
-              } else {
-                reach_end_of_stream = true;
-              }
-              return outgoing_frames.Send(&frame);
-            },
-            [reach_end_of_stream]() -> LoopCtl<absl::Status> {
-              std::cout << "\n reach end of steram " << reach_end_of_stream;
-              fflush(stdout);
-              if (reach_end_of_stream) {
+    return Seq(call_args.client_to_server_messages->Next(), 
+    [&initial_frame, reach_end_of_stream, &outgoing_frames, this](NextResult<MessageHandle> message) mutable { 
+            std::cout << "\n get next message " << message.has_value();
+            fflush(stdout);
+            // return std::move(*message);
+            if (message.has_value()) {
+                // initial_frame.message = std::move(message.value());
+                initial_frame.end_of_stream = false;
+            } else {
+                initial_frame.end_of_stream = true;
+            }
+            reach_end_of_stream = initial_frame.end_of_stream;
+            ClientFrame cast_frame = ClientFrame(std::move(initial_frame));
+            return Join(outgoing_frames.Send(std::move(cast_frame)), [this](){
+                this->writer_->ForceWakeup();
                 return absl::OkStatus();
-              }
-              return Continue();
-            })));
+            });
+        // return std::move(*message);
+        });
   }
+    // return Seq(Map(call_args.client_to_server_messages->Next(),
+    //     [&initial_frame, reach_end_of_stream, &outgoing_frames](NextResult<MessageHandle> message) mutable {
+    //         std::cout << "\n get next message";
+    //         if (message.has_value()) {
+    //             initial_frame.message = std::move(message.value());
+    //             initial_frame.end_of_stream = false;
+    //         } else {
+    //             initial_frame.end_of_stream = true;
+    //         }
+    //         reach_end_of_stream = initial_frame.end_of_stream;
+    //         return outgoing_frames.Send(&initial_frame);
+    //     }),
+    //     Loop(Seq(
+    //         [reach_end_of_stream, stream_id, &outgoing_frames,
+    //          &call_args]() mutable {
+    //           // Poll next frame from client_to_server_messages.
+    //           ClientFragmentFrame frame;
+    //           frame.stream_id = stream_id;
+    //           auto next_message = call_args.client_to_server_messages->Next()();
+    //           if (next_message.ready()) {
+    //             auto message = std::move(next_message.value());
+    //             if (message.has_value()) {
+    //               frame.message = std::move(message.value());
+    //               frame.end_of_stream = false;
+    //             } else {
+    //               frame.end_of_stream = true;
+    //             }
+    //           } else {
+    //             reach_end_of_stream = true;
+    //           }
+    //           return outgoing_frames.Send(&frame);
+    //         },
+    //         [reach_end_of_stream]() -> LoopCtl<absl::Status> {
+    //           std::cout << "\n reach end of steram " << reach_end_of_stream;
+    //           fflush(stdout);
+    //           if (reach_end_of_stream) {
+    //             return absl::OkStatus();
+    //           }
+    //           return Continue();
+    //         })));
+  
 
  private:
   // Max buffer is set to 4, so that for stream writes each time it will queue
   // at most 2 frames.
-  MpscReceiver<FrameInterface*> outgoing_frames_ =
-      MpscReceiver<FrameInterface*>(4);
+  MpscReceiver<ClientFrame> outgoing_frames_ =
+      MpscReceiver<ClientFrame>(4);
   Mutex mu_;
   uint32_t next_stream_id_ ABSL_GUARDED_BY(mu_) = 1;
   ActivityPtr writer_;

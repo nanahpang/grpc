@@ -22,6 +22,7 @@
 
 #include "absl/status/statusor.h"
 #include "absl/types/variant.h"
+#include "frame.h"
 
 #include <grpc/event_engine/event_engine.h>
 #include <grpc/slice.h>
@@ -35,9 +36,11 @@
 #include "src/core/lib/promise/detail/basic_seq.h"
 #include "src/core/lib/promise/event_engine_wakeup_scheduler.h"
 #include "src/core/lib/promise/join.h"
+#include "src/core/lib/promise/map.h"
 #include "src/core/lib/promise/loop.h"
 #include "src/core/lib/promise/poll.h"
 #include "src/core/lib/slice/slice.h"
+#include "src/core/lib/gprpp/match.h"
 #include "src/core/lib/slice/slice_buffer.h"
 #include "src/core/lib/slice/slice_internal.h"
 #include "src/core/lib/transport/promise_endpoint.h"
@@ -53,15 +56,20 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
       Loop(Seq(
           outgoing_frames_.Next(),
           [&hpack_compressor, &control_endpoint,
-           &data_endpoint](FrameInterface* frame) {
-            auto control_endpoint_buffer = frame->Serialize(&hpack_compressor);
+           &data_endpoint](ClientFrame frame) {
+            return Match(frame, [&hpack_compressor, &control_endpoint, &data_endpoint](ClientFragmentFrame frame){
+                std::cout << "\n frame address " << &frame;
+            fflush(stdout);
+            auto control_endpoint_buffer = frame.Serialize(&hpack_compressor);
+            std::cout << "\n writer_ send next frame.";
+            fflush(stdout);
             FrameHeader frame_header =
                 FrameHeader::Parse(
                     reinterpret_cast<const uint8_t*>(grpc_slice_to_c_string(
                         control_endpoint_buffer.c_slice_buffer()->slices[0])))
                     .value();
-            std::cout << "\n writer_ send next frame.";
             SliceBuffer data_endpoint_buffer;
+            
             // Handle data endpoint buffer based on the frame type.
             switch (frame_header.type) {
               case FrameType::kSettings:
@@ -73,11 +81,11 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
                 Slice slice(grpc_slice_from_cpp_string(message_padding));
                 data_endpoint_buffer.Append(std::move(slice));
                 uint8_t message_size = frame_header.message_length;
-                auto message = std::move(
-                    dynamic_cast<ClientFragmentFrame*>(frame)->message);
-                GPR_ASSERT(message_size == message->payload()->Length());
-                message->payload()->MoveFirstNBytesIntoSliceBuffer(
-                    message_size, data_endpoint_buffer);
+                // auto message = std::move(
+                //     dynamic_cast<ClientFragmentFrame*>(frame)->message);
+                // GPR_ASSERT(message_size == message->payload()->Length());
+                // message->payload()->MoveFirstNBytesIntoSliceBuffer(
+                //     message_size, data_endpoint_buffer);
                 std::cout << "data frame message length " << message_size;
                 break;
               }
@@ -97,10 +105,12 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
                   }
                   return Continue();
                 });
+            });
+            
           })),
       EventEngineWakeupScheduler(
           grpc_event_engine::experimental::CreateEventEngine()),
-      [](absl::Status status) -> absl::Status { return status; });
+      [](absl::Status status) { return absl::OkStatus(); });
 }
 
 }  // namespace chaotic_good

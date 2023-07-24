@@ -5816,12 +5816,14 @@ grpc_cc_library(
         "pipe",
         "poll",
         "seq",
+        "map",
         "slice",
         "slice_buffer",
         "//:gpr",
         "//:gpr_platform",
         "//:grpc_base",
         "//:hpack_encoder",
+        "//src/core:match",
     ],
 )
 
