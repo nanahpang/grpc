@@ -22,21 +22,20 @@
 
 #include <initializer_list>
 #include <iostream>
+#include <memory>
 #include <utility>
 
 #include "absl/base/thread_annotations.h"
 #include "absl/status/status.h"
-#include "frame.h"
 
 #include "src/core/ext/transport/chaotic_good/frame.h"
 #include "src/core/lib/channel/channel_args.h"
 #include "src/core/lib/gprpp/sync.h"
 #include "src/core/lib/promise/activity.h"
-#include "src/core/lib/promise/loop.h"
+#include "src/core/lib/promise/detail/basic_seq.h"
 #include "src/core/lib/promise/join.h"
 #include "src/core/lib/promise/mpsc.h"
 #include "src/core/lib/promise/pipe.h"
-#include "src/core/lib/promise/poll.h"
 #include "src/core/lib/promise/seq.h"
 #include "src/core/lib/transport/promise_endpoint.h"
 #include "src/core/lib/transport/transport.h"
@@ -63,24 +62,27 @@ class ClientTransport {
     bool reach_end_of_stream = initial_frame.end_of_stream;
     MpscSender<FrameInterface*> outgoing_frames =
         this->outgoing_frames_.MakeSender();
-    // TODO(): change to Loop() or ForEach() to send all messages in client_to_server_message.
-    return Seq(call_args.client_to_server_messages->Next(), 
-    [&initial_frame, reach_end_of_stream, &outgoing_frames, this](NextResult<MessageHandle> message) mutable { 
-            std::cout << "\n get next message " << message.has_value();
-            fflush(stdout);
-            if (message.has_value()) {
-                // initial_frame.message = std::move(message.value());
-                initial_frame.end_of_stream = false;
-            } else {
-                initial_frame.end_of_stream = true;
-            }
-            reach_end_of_stream = initial_frame.end_of_stream;
-            // ClientFrame cast_frame = ClientFrame(std::move(initial_frame));
-            return Join(outgoing_frames.Send(&initial_frame), [this](){
-                this->writer_->ForceWakeup();
-                return absl::OkStatus();
-            });
-        });
+    // TODO(): change to Loop() or ForEach() to send all messages in
+    // client_to_server_message.
+    return Seq(call_args.client_to_server_messages->Next(),
+               [&initial_frame, reach_end_of_stream, &outgoing_frames,
+                this](NextResult<MessageHandle> message) mutable {
+                 std::cout << "\n get next message " << message.has_value();
+                 fflush(stdout);
+                 if (message.has_value()) {
+                   // initial_frame.message = std::move(message.value());
+                   initial_frame.end_of_stream = false;
+                 } else {
+                   initial_frame.end_of_stream = true;
+                 }
+                 reach_end_of_stream = initial_frame.end_of_stream;
+                 // ClientFrame cast_frame =
+                 // ClientFrame(std::move(initial_frame));
+                 return Join(outgoing_frames.Send(&initial_frame), [this]() {
+                   this->writer_->ForceWakeup();
+                   return absl::OkStatus();
+                 });
+               });
   }
 
  private:

@@ -16,29 +16,23 @@
 
 #include "src/core/ext/transport/chaotic_good/client_transport.h"
 
-#include <memory>
 #include <string>
 #include <tuple>
 
 #include "absl/status/statusor.h"
-#include "absl/types/variant.h"
-#include "frame.h"
 
 #include <grpc/event_engine/event_engine.h>
 #include <grpc/slice.h>
-#include <grpc/support/log.h>
 
 #include "src/core/ext/transport/chaotic_good/frame.h"
 #include "src/core/ext/transport/chaotic_good/frame_header.h"
 #include "src/core/ext/transport/chttp2/transport/hpack_encoder.h"
 #include "src/core/lib/promise/activity.h"
+#include "src/core/lib/promise/detail/basic_join.h"
 #include "src/core/lib/promise/event_engine_wakeup_scheduler.h"
 #include "src/core/lib/promise/join.h"
-#include "src/core/lib/promise/map.h"
 #include "src/core/lib/promise/loop.h"
-#include "src/core/lib/promise/poll.h"
 #include "src/core/lib/slice/slice.h"
-#include "src/core/lib/gprpp/match.h"
 #include "src/core/lib/slice/slice_buffer.h"
 #include "src/core/lib/slice/slice_internal.h"
 #include "src/core/lib/transport/promise_endpoint.h"
@@ -54,11 +48,12 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
       Loop(Seq(
           outgoing_frames_.Next(),
           [&hpack_compressor, &control_endpoint,
-           &data_endpoint](FrameInterface* frame){
+           &data_endpoint](FrameInterface* frame) {
             std::cout << "\n frame address " << frame;
             fflush(stdout);
             auto client_frame = dynamic_cast<ClientFragmentFrame*>(frame);
-            auto control_endpoint_buffer = client_frame->Serialize(&hpack_compressor);
+            auto control_endpoint_buffer =
+                client_frame->Serialize(&hpack_compressor);
             std::cout << "\n writer_ send next frame.";
             fflush(stdout);
             FrameHeader frame_header =
@@ -67,7 +62,7 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
                         control_endpoint_buffer.c_slice_buffer()->slices[0])))
                     .value();
             SliceBuffer data_endpoint_buffer;
-            
+
             // Handle data endpoint buffer based on the frame type.
             switch (frame_header.type) {
               case FrameType::kSettings:
@@ -96,7 +91,7 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
                      data_endpoint.Write(SliceBuffer())),
                 [](std::tuple<absl::StatusOr<SliceBuffer>,
                               absl::StatusOr<SliceBuffer>>
-                       ret) -> LoopCtl<absl::Status>{
+                       ret) -> LoopCtl<absl::Status> {
                   if (!(std::get<0>(ret).ok() && std::get<1>(ret).ok())) {
                     // TODO(ladynana): better error handling when writes failed.
                     return absl::InternalError("Endpoint Write failed.");
@@ -104,7 +99,7 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
                   return Continue();
                 });
             // return absl::OkStatus();
-            })),
+          })),
       EventEngineWakeupScheduler(
           grpc_event_engine::experimental::CreateEventEngine()),
       [](absl::Status status) { return absl::OkStatus(); });

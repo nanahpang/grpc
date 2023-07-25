@@ -18,7 +18,6 @@
 
 #include <stdio.h>
 
-#include <iostream>
 #include <memory>
 #include <string>
 
@@ -36,8 +35,9 @@
 
 #include "src/core/lib/gprpp/ref_counted_ptr.h"
 #include "src/core/lib/promise/activity.h"
-#include "src/core/lib/promise/seq.h"
+#include "src/core/lib/promise/detail/basic_join.h"
 #include "src/core/lib/promise/join.h"
+#include "src/core/lib/promise/seq.h"
 #include "src/core/lib/resource_quota/arena.h"
 #include "src/core/lib/resource_quota/memory_quota.h"
 #include "src/core/lib/resource_quota/resource_quota.h"
@@ -139,7 +139,6 @@ class ClientTransportTest : public ::testing::Test {
   MockEndpoint* control_endpoint_ptr_;
   MockEndpoint* data_endpoint_ptr_;
   size_t initial_arena_size = 1024;
-  
 
  protected:
   MemoryAllocator memory_allocator_;
@@ -153,32 +152,34 @@ class ClientTransportTest : public ::testing::Test {
 };
 
 TEST_F(ClientTransportTest, AddOneStream) {
-    SliceBuffer buffer;
-    buffer.Append(Slice::FromCopiedString("test add stream."));
-    auto message = arena_->MakePooled<Message>(std::move(buffer), 0);
-    ClientMetadataHandle md;
-    CallArgs args = CallArgs{
+  SliceBuffer buffer;
+  buffer.Append(Slice::FromCopiedString("test add stream."));
+  auto message = arena_->MakePooled<Message>(std::move(buffer), 0);
+  ClientMetadataHandle md;
+  CallArgs args = CallArgs{
       std::move(md), ClientInitialMetadataOutstandingToken::Empty(), nullptr,
       nullptr,       &pipe_client_to_server_messages_.receiver,      nullptr};
-    StrictMock<MockFunction<void(absl::Status)>> on_done;
-    EXPECT_CALL(on_done, Call(absl::OkStatus()));
-    auto activity = MakeActivity(
-        [this, &message, &args] {
-            return Seq(
-                // Concurrently: send message into the pipe, and receive from the pipe.
-                Join(pipe_client_to_server_messages_.sender.Push(std::move(message)),
-                    Seq(client_transport_.AddStream(std::move(args)), [](){return absl::OkStatus();})),
-                // Once complete, verify successful sending and the received value.
-                []() {
-                // TODO: verify results.
-                return absl::OkStatus();
-                });
-        },
-        InlineWakeupScheduler(),
-        [&on_done](absl::Status status) { on_done.Call(std::move(status)); }
-        );
-    absl::SleepFor(absl::Seconds(2));
-    fflush(stdout);
+  StrictMock<MockFunction<void(absl::Status)>> on_done;
+  EXPECT_CALL(on_done, Call(absl::OkStatus()));
+  auto activity = MakeActivity(
+      [this, &message, &args] {
+        return Seq(
+            // Concurrently: send message into the pipe, and receive from the
+            // pipe.
+            Join(
+                pipe_client_to_server_messages_.sender.Push(std::move(message)),
+                Seq(client_transport_.AddStream(std::move(args)),
+                    []() { return absl::OkStatus(); })),
+            // Once complete, verify successful sending and the received value.
+            []() {
+              // TODO(unknown): verify results.
+              return absl::OkStatus();
+            });
+      },
+      InlineWakeupScheduler(),
+      [&on_done](absl::Status status) { on_done.Call(std::move(status)); });
+  absl::SleepFor(absl::Seconds(2));
+  fflush(stdout);
 }
 
 }  // namespace testing
