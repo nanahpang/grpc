@@ -47,19 +47,17 @@ namespace grpc_core {
 namespace chaotic_good {
 
 ClientTransport::ClientTransport(const ChannelArgs& channel_args,
-                                 PromiseEndpoint control_endpoint,
-                                 PromiseEndpoint data_endpoint) {
-  HPackCompressor hpack_compressor;
+                                 PromiseEndpoint&& control_endpoint,
+                                 PromiseEndpoint&& data_endpoint) {
+  auto hpack_compressor = std::make_shared<HPackCompressor>();
   writer_ = MakeActivity(
       Loop(Seq(
           outgoing_frames_.Next(),
-          [&hpack_compressor, &control_endpoint,
-           &data_endpoint](FrameInterface* frame){
+          [hpack_compressor, &control_endpoint, &data_endpoint](FrameInterface* frame){
             std::cout << "\n frame address " << frame;
             fflush(stdout);
-            auto client_frame = dynamic_cast<ClientFragmentFrame*>(frame);
-            auto control_endpoint_buffer = client_frame->Serialize(&hpack_compressor);
-            std::cout << "\n writer_ send next frame.";
+            auto control_endpoint_buffer = frame->Serialize(hpack_compressor.get());
+            std::cout << "\n frame serialize length: " << control_endpoint_buffer.Length();
             fflush(stdout);
             FrameHeader frame_header =
                 FrameHeader::Parse(
@@ -67,38 +65,47 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
                         control_endpoint_buffer.c_slice_buffer()->slices[0])))
                     .value();
             SliceBuffer data_endpoint_buffer;
-            
+            std::cout << "\n frame header parse stream: " << frame_header.stream_id;
+            fflush(stdout);
             // Handle data endpoint buffer based on the frame type.
             switch (frame_header.type) {
               case FrameType::kSettings:
                 // No data will be sent on data endpoint;
                 break;
               case FrameType::kFragment: {
+                std::cout << "\n message padding size: " << frame_header.message_padding;
+                fflush(stdout);
                 uint8_t message_padding_size = frame_header.message_padding;
                 std::string message_padding(message_padding_size, '0');
                 Slice slice(grpc_slice_from_cpp_string(message_padding));
                 data_endpoint_buffer.Append(std::move(slice));
-                uint8_t message_size = frame_header.message_length;
-                // auto message = std::move(
-                //     dynamic_cast<ClientFragmentFrame*>(frame)->message);
-                // GPR_ASSERT(message_size == message->payload()->Length());
-                // message->payload()->MoveFirstNBytesIntoSliceBuffer(
-                //     message_size, data_endpoint_buffer);
-                std::cout << "data frame message length " << message_size;
+                
+                auto message = std::move(
+                    static_cast<ClientFragmentFrame*>(frame)->message);
+                    std::cout << "\n data buffer append: " << message->payload()->Length();
+                fflush(stdout);
+                frame_header.message_length = message->payload()->Length();
+                message->payload()->MoveFirstNBytesIntoSliceBuffer(
+                    frame_header.message_length, data_endpoint_buffer);
+                std::cout << "\n data frame message length " << frame_header.message_length << " / " << message->payload()->Length();
                 break;
               }
               case FrameType::kCancel:
                 // No data will be sent on data endpoint;
                 break;
             }
+            std::cout << "\n writer_ exit loop.";
+            fflush(stdout);
             return Seq(
-                Join(control_endpoint.Write(SliceBuffer()),
-                     data_endpoint.Write(SliceBuffer())),
+                Join(control_endpoint.Write(std::move(control_endpoint_buffer)),
+                     data_endpoint.Write(std::move(data_endpoint_buffer))),
                 [](std::tuple<absl::StatusOr<SliceBuffer>,
                               absl::StatusOr<SliceBuffer>>
                        ret) -> LoopCtl<absl::Status>{
                   if (!(std::get<0>(ret).ok() && std::get<1>(ret).ok())) {
                     // TODO(ladynana): better error handling when writes failed.
+                    std::cout << "\n writer_ failed.";
+                    fflush(stdout);
                     return absl::InternalError("Endpoint Write failed.");
                   }
                   return Continue();
@@ -107,7 +114,11 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
             })),
       EventEngineWakeupScheduler(
           grpc_event_engine::experimental::CreateEventEngine()),
-      [](absl::Status status) { return absl::OkStatus(); });
+      [](absl::Status status) { 
+        std::cout << "\n writer_ on done." << status.ok();
+            fflush(stdout);
+
+            });
 }
 
 }  // namespace chaotic_good

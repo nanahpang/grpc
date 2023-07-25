@@ -125,12 +125,12 @@ class ClientTransportTest : public ::testing::Test {
         control_endpoint_(*control_endpoint_ptr_),
         data_endpoint_(*data_endpoint_ptr_),
         control_promise_endpoint_(
-            std::unique_ptr<MockEndpoint>(control_endpoint_ptr_),
-            SliceBuffer()),
+            new PromiseEndpoint(std::unique_ptr<MockEndpoint>(control_endpoint_ptr_),
+            SliceBuffer())),
         data_promise_endpoint_(
-            std::unique_ptr<MockEndpoint>(data_endpoint_ptr_), SliceBuffer()),
-        client_transport_(channel_args_, control_promise_endpoint_,
-                          data_promise_endpoint_),
+            new PromiseEndpoint(std::unique_ptr<MockEndpoint>(data_endpoint_ptr_), SliceBuffer())),
+        client_transport_(channel_args_, std::move(*control_promise_endpoint_),
+                          std::move(*data_promise_endpoint_)),
         arena_(MakeScopedArena(initial_arena_size, &memory_allocator_)),
         pipe_client_to_server_messages_(arena_.get()) {}
 
@@ -145,8 +145,8 @@ class ClientTransportTest : public ::testing::Test {
   MemoryAllocator memory_allocator_;
   MockEndpoint& control_endpoint_;
   MockEndpoint& data_endpoint_;
-  PromiseEndpoint control_promise_endpoint_;
-  PromiseEndpoint data_promise_endpoint_;
+  std::unique_ptr<PromiseEndpoint> control_promise_endpoint_;
+  std::unique_ptr<PromiseEndpoint> data_promise_endpoint_;
   ClientTransport client_transport_;
   ScopedArenaPtr arena_;
   Pipe<MessageHandle> pipe_client_to_server_messages_;
@@ -157,27 +157,39 @@ TEST_F(ClientTransportTest, AddOneStream) {
     buffer.Append(Slice::FromCopiedString("test add stream."));
     auto message = arena_->MakePooled<Message>(std::move(buffer), 0);
     ClientMetadataHandle md;
-    CallArgs args = CallArgs{
+    auto args = new CallArgs{
       std::move(md), ClientInitialMetadataOutstandingToken::Empty(), nullptr,
       nullptr,       &pipe_client_to_server_messages_.receiver,      nullptr};
-    StrictMock<MockFunction<void(absl::Status)>> on_done;
-    EXPECT_CALL(on_done, Call(absl::OkStatus()));
+    auto on_done =  std::make_shared<StrictMock<MockFunction<void(absl::Status)>>>();
+    EXPECT_CALL(*on_done, Call(absl::OkStatus()));
+    EXPECT_CALL(control_endpoint_, Write).WillOnce(Return(true));
+    EXPECT_CALL(data_endpoint_, Write).WillOnce(Return(true));
     auto activity = MakeActivity(
-        [this, &message, &args] {
-            return Seq(
+        Seq(
                 // Concurrently: send message into the pipe, and receive from the pipe.
-                Join(pipe_client_to_server_messages_.sender.Push(std::move(message)),
-                    Seq(client_transport_.AddStream(std::move(args)), [](){return absl::OkStatus();})),
+                Join(Seq(pipe_client_to_server_messages_.sender.Push(std::move(message)),
+                [this]{this->pipe_client_to_server_messages_.sender.Close(); return absl::OkStatus();}),
+                    Seq(client_transport_.AddStream(std::move(*args)), 
+                    [](){
+                        std::cout << "\n return OK 1. " ;
+                        fflush(stdout);
+                        return absl::OkStatus();})),
                 // Once complete, verify successful sending and the received value.
                 []() {
                 // TODO: verify results.
+                std::cout << "\n return OK 2. " ;
+                fflush(stdout);
                 return absl::OkStatus();
-                });
-        },
+                }),
         InlineWakeupScheduler(),
-        [&on_done](absl::Status status) { on_done.Call(std::move(status)); }
+        [on_done](absl::Status status) { 
+            std::cout << "\n test on done: " << status.ToString();
+            fflush(stdout);
+            on_done->Call(std::move(status));
+             }
         );
-    absl::SleepFor(absl::Seconds(2));
+    // absl::SleepFor(absl::Seconds(5));
+    std::cout << "\n exit" ;
     fflush(stdout);
 }
 

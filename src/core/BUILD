@@ -5867,6 +5867,7 @@ grpc_cc_library(
         "mpsc",
         "pipe",
         "poll",
+        "for_each",
         "seq",
         "map",
         "slice",

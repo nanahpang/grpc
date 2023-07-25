@@ -50,9 +50,6 @@ class PromiseEndpoint {
       std::unique_ptr<grpc_event_engine::experimental::EventEngine::Endpoint>
           endpoint,
       SliceBuffer already_received);
-  PromiseEndpoint(const PromiseEndpoint& other) {
-    // Do not copy endpoint_.
-  }
   ~PromiseEndpoint();
 
   // Returns a promise that resolves to a `absl::Status` indicating the result

@@ -26,7 +26,8 @@
 
 #include "absl/base/thread_annotations.h"
 #include "absl/status/status.h"
-#include "frame.h"
+#include "absl/types/optional.h"
+#include "absl/types/variant.h"
 
 #include "src/core/ext/transport/chaotic_good/frame.h"
 #include "src/core/lib/channel/channel_args.h"
@@ -36,6 +37,8 @@
 #include "src/core/lib/promise/join.h"
 #include "src/core/lib/promise/mpsc.h"
 #include "src/core/lib/promise/pipe.h"
+#include "src/core/lib/promise/map.h"
+#include "src/core/lib/promise/for_each.h"
 #include "src/core/lib/promise/poll.h"
 #include "src/core/lib/promise/seq.h"
 #include "src/core/lib/transport/promise_endpoint.h"
@@ -47,39 +50,59 @@ namespace chaotic_good {
 class ClientTransport {
  public:
   ClientTransport(const ChannelArgs& channel_args,
-                  PromiseEndpoint control_endpoint_,
-                  PromiseEndpoint data_endpoint_);
+                  PromiseEndpoint&& control_endpoint_,
+                  PromiseEndpoint&& data_endpoint_);
+  ~ClientTransport() {
+    std::cout << "\n destruct client transport";
+            fflush(stdout);
+    if (writer_ != nullptr) {
+        std::cout << "\n destruct writer " ;
+            fflush(stdout);
+        writer_.get_deleter();}
+  }
   auto AddStream(CallArgs call_args) {
     // At this point, the connection is set up.
     // Start sending data frames.
-    ClientFragmentFrame initial_frame;
-    initial_frame.headers = std::move(call_args.client_initial_metadata);
-    initial_frame.end_of_stream = false;
+    auto initial_frame = std::make_shared<ClientFragmentFrame>();
+    initial_frame->headers = std::move(call_args.client_initial_metadata);
+    initial_frame->end_of_stream = false;
     {
       MutexLock lock(&mu_);
-      initial_frame.stream_id = next_stream_id_++;
+      initial_frame->stream_id = next_stream_id_++;
     }
-    const uint32_t stream_id = initial_frame.stream_id;
-    bool reach_end_of_stream = initial_frame.end_of_stream;
-    MpscSender<FrameInterface*> outgoing_frames =
-        this->outgoing_frames_.MakeSender();
+    // const uint32_t stream_id = initial_frame->stream_id;
+    // bool reach_end_of_stream = initial_frame->end_of_stream;
+    
     // TODO(): change to Loop() or ForEach() to send all messages in client_to_server_message.
-    return Seq(call_args.client_to_server_messages->Next(), 
-    [&initial_frame, reach_end_of_stream, &outgoing_frames, this](NextResult<MessageHandle> message) mutable { 
-            std::cout << "\n get next message " << message.has_value();
-            fflush(stdout);
-            if (message.has_value()) {
-                // initial_frame.message = std::move(message.value());
-                initial_frame.end_of_stream = false;
-            } else {
-                initial_frame.end_of_stream = true;
-            }
-            reach_end_of_stream = initial_frame.end_of_stream;
-            // ClientFrame cast_frame = ClientFrame(std::move(initial_frame));
-            return Join(outgoing_frames.Send(&initial_frame), [this](){
+    return ForEach(std::move(*call_args.client_to_server_messages), 
+    [this, initial_frame](MessageHandle result) { 
+        MpscSender<FrameInterface*> outgoing_frames =
+        this->outgoing_frames_.MakeSender();
+        std::cout << "\n for each get message: " << result->payload()->JoinIntoString();
+                fflush(stdout);
+                initial_frame->message = std::move(result);
+                std::cout << "\n move result length: " << initial_frame->message->payload()->Length();
+                fflush(stdout);
+            // if (result.has_value()) {
+            //     std::cout << "\n for each get message: " << result.value()->payload()->JoinIntoString();
+            //     fflush(stdout);
+            //     initial_frame->message = std::move(*result);
+            //     std::cout << "\n move result length: " << initial_frame->message->payload()->Length();
+            //     fflush(stdout);
+            //     initial_frame->end_of_stream = false;
+            // } else {
+            //     initial_frame->end_of_stream = true;
+            // }
+            // initial_frame.message = std::move(result);
+            // reach_end_of_stream = initial_frame.end_of_stream;
+            // // // ClientFrame cast_frame = ClientFrame(std::move(initial_frame));
+            return Seq(outgoing_frames.Send(initial_frame.get()),[this]{
+                std::cout << "\n outgoing_frames send finish: ";
+                fflush(stdout);
                 this->writer_->ForceWakeup();
-                return absl::OkStatus();
-            });
+                absl::SleepFor(absl::Seconds(5));
+                return absl::OkStatus();});
+            // return outgoing_frames.Send(&initial_frame);
         });
   }
 
