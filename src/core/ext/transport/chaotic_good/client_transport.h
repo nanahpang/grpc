@@ -61,7 +61,7 @@ class ClientTransport {
     }
     const uint32_t stream_id = initial_frame.stream_id;
     bool reach_end_of_stream = initial_frame.end_of_stream;
-    MpscSender<ClientFrame> outgoing_frames =
+    MpscSender<FrameInterface*> outgoing_frames =
         this->outgoing_frames_.MakeSender();
     return Seq(call_args.client_to_server_messages->Next(), 
     [&initial_frame, reach_end_of_stream, &outgoing_frames, this](NextResult<MessageHandle> message) mutable { 
@@ -75,8 +75,8 @@ class ClientTransport {
                 initial_frame.end_of_stream = true;
             }
             reach_end_of_stream = initial_frame.end_of_stream;
-            ClientFrame cast_frame = ClientFrame(std::move(initial_frame));
-            return Join(outgoing_frames.Send(std::move(cast_frame)), [this](){
+            // ClientFrame cast_frame = ClientFrame(std::move(initial_frame));
+            return Join(outgoing_frames.Send(&initial_frame), [this](){
                 this->writer_->ForceWakeup();
                 return absl::OkStatus();
             });
@@ -128,8 +128,8 @@ class ClientTransport {
  private:
   // Max buffer is set to 4, so that for stream writes each time it will queue
   // at most 2 frames.
-  MpscReceiver<ClientFrame> outgoing_frames_ =
-      MpscReceiver<ClientFrame>(4);
+  MpscReceiver<FrameInterface*> outgoing_frames_ =
+      MpscReceiver<FrameInterface*>(4);
   Mutex mu_;
   uint32_t next_stream_id_ ABSL_GUARDED_BY(mu_) = 1;
   ActivityPtr writer_;
