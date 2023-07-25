@@ -102,11 +102,11 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
                 [](std::tuple<absl::StatusOr<SliceBuffer>,
                               absl::StatusOr<SliceBuffer>>
                        ret) -> LoopCtl<absl::Status>{
-                  if (!(std::get<0>(ret).ok() && std::get<1>(ret).ok())) {
+                  if (!(std::get<0>(ret).status().ok() || std::get<1>(ret).status().ok())) {
                     // TODO(ladynana): better error handling when writes failed.
-                    std::cout << "\n writer_ failed.";
+                    std::cout << "\n writer_ failed ret 1: " << std::get<0>(ret).status().ToString();
                     fflush(stdout);
-                    return absl::InternalError("Endpoint Write failed.");
+                    // return absl::InternalError("Endpoint Write failed.");
                   }
                   return Continue();
                 });

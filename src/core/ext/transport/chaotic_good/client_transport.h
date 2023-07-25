@@ -99,7 +99,6 @@ class ClientTransport {
             return Seq(outgoing_frames.Send(initial_frame.get()),[this]{
                 std::cout << "\n outgoing_frames send finish: ";
                 fflush(stdout);
-                this->writer_->ForceWakeup();
                 absl::SleepFor(absl::Seconds(5));
                 return absl::OkStatus();});
             // return outgoing_frames.Send(&initial_frame);
