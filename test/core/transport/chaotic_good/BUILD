@@ -77,3 +77,29 @@ grpc_fuzzer(
         "//test/core/promise:test_context",
     ],
 )
+
+grpc_cc_test(
+    name = "client_transport_test",
+    srcs = ["client_transport_test.cc"],
+    external_deps = [
+        "absl/functional:any_invocable",
+        "absl/time",
+        "gtest",
+    ],
+    language = "C++",
+    uses_event_engine = False,
+    uses_polling = False,
+    deps = [
+        "//:grpc",
+        "//src/core:activity",
+        "//src/core:arena",
+        "//src/core:chaotic_good_client_transport",
+        "//src/core:memory_quota",
+        "//src/core:resource_quota",
+        "//src/core:seq",
+        "//src/core:join",
+        "//src/core:slice",
+        "//src/core:slice_buffer",
+        "//test/core/promise:test_wakeup_schedulers",
+    ],
+)

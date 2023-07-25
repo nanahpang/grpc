@@ -5840,6 +5840,45 @@ grpc_cc_library(
     ],
 )
 
+grpc_cc_library(
+    name = "chaotic_good_client_transport",
+    srcs = [
+        "ext/transport/chaotic_good/client_transport.cc",
+    ],
+    hdrs = [
+        "ext/transport/chaotic_good/client_transport.h",
+    ],
+    external_deps = [
+        "absl/base:core_headers",
+        "absl/status",
+        "absl/status:statusor",
+        "absl/types:variant",
+    ],
+    language = "c++",
+    deps = [
+        "activity",
+        "channel_args",
+        "chaotic_good_frame",
+        "chaotic_good_frame_header",
+        "event_engine_wakeup_scheduler",
+        "grpc_promise_endpoint",
+        "join",
+        "loop",
+        "mpsc",
+        "pipe",
+        "poll",
+        "seq",
+        "map",
+        "slice",
+        "slice_buffer",
+        "//:gpr",
+        "//:gpr_platform",
+        "//:grpc_base",
+        "//:hpack_encoder",
+        "//src/core:match",
+    ],
+)
+
 ### UPB Targets
 
 grpc_upb_proto_library(
