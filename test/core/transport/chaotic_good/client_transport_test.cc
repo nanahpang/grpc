@@ -23,8 +23,6 @@
 #include <string>
 
 #include "absl/functional/any_invocable.h"
-#include "absl/time/clock.h"
-#include "absl/time/time.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -36,8 +34,9 @@
 
 #include "src/core/lib/gprpp/ref_counted_ptr.h"
 #include "src/core/lib/promise/activity.h"
-#include "src/core/lib/promise/seq.h"
+#include "src/core/lib/promise/detail/basic_join.h"
 #include "src/core/lib/promise/join.h"
+#include "src/core/lib/promise/seq.h"
 #include "src/core/lib/resource_quota/arena.h"
 #include "src/core/lib/resource_quota/memory_quota.h"
 #include "src/core/lib/resource_quota/resource_quota.h"
@@ -124,11 +123,11 @@ class ClientTransportTest : public ::testing::Test {
                 "test")),
         control_endpoint_(*control_endpoint_ptr_),
         data_endpoint_(*data_endpoint_ptr_),
-        control_promise_endpoint_(
-            new PromiseEndpoint(std::unique_ptr<MockEndpoint>(control_endpoint_ptr_),
+        control_promise_endpoint_(new PromiseEndpoint(
+            std::unique_ptr<MockEndpoint>(control_endpoint_ptr_),
             SliceBuffer())),
-        data_promise_endpoint_(
-            new PromiseEndpoint(std::unique_ptr<MockEndpoint>(data_endpoint_ptr_), SliceBuffer())),
+        data_promise_endpoint_(new PromiseEndpoint(
+            std::unique_ptr<MockEndpoint>(data_endpoint_ptr_), SliceBuffer())),
         client_transport_(channel_args_, std::move(*control_promise_endpoint_),
                           std::move(*data_promise_endpoint_)),
         arena_(MakeScopedArena(initial_arena_size, &memory_allocator_)),
@@ -139,7 +138,6 @@ class ClientTransportTest : public ::testing::Test {
   MockEndpoint* control_endpoint_ptr_;
   MockEndpoint* data_endpoint_ptr_;
   size_t initial_arena_size = 1024;
-  
 
  protected:
   MemoryAllocator memory_allocator_;
@@ -153,44 +151,49 @@ class ClientTransportTest : public ::testing::Test {
 };
 
 TEST_F(ClientTransportTest, AddOneStream) {
-    SliceBuffer buffer;
-    buffer.Append(Slice::FromCopiedString("test add stream."));
-    auto message = arena_->MakePooled<Message>(std::move(buffer), 0);
-    ClientMetadataHandle md;
-    auto args = new CallArgs{
+  SliceBuffer buffer;
+  buffer.Append(Slice::FromCopiedString("test add stream."));
+  auto message = arena_->MakePooled<Message>(std::move(buffer), 0);
+  ClientMetadataHandle md;
+  auto args = new CallArgs{
       std::move(md), ClientInitialMetadataOutstandingToken::Empty(), nullptr,
       nullptr,       &pipe_client_to_server_messages_.receiver,      nullptr};
-    auto on_done =  std::make_shared<StrictMock<MockFunction<void(absl::Status)>>>();
-    EXPECT_CALL(*on_done, Call(absl::OkStatus()));
-    EXPECT_CALL(control_endpoint_, Write).WillOnce(Return(true));
-    EXPECT_CALL(data_endpoint_, Write).WillOnce(Return(true));
-    auto activity = MakeActivity(
-        Seq(
-                // Concurrently: send message into the pipe, and receive from the pipe.
-                Join(Seq(pipe_client_to_server_messages_.sender.Push(std::move(message)),
-                [this]{this->pipe_client_to_server_messages_.sender.Close(); return absl::OkStatus();}),
-                    Seq(client_transport_.AddStream(std::move(*args)), 
-                    [](){
-                        std::cout << "\n return OK 1. " ;
-                        fflush(stdout);
-                        return absl::OkStatus();})),
-                // Once complete, verify successful sending and the received value.
-                []() {
-                // TODO: verify results.
-                std::cout << "\n return OK 2. " ;
-                fflush(stdout);
-                return absl::OkStatus();
-                }),
-        InlineWakeupScheduler(),
-        [on_done](absl::Status status) { 
-            std::cout << "\n test on done: " << status.ToString();
+  auto on_done =
+      std::make_shared<StrictMock<MockFunction<void(absl::Status)>>>();
+  EXPECT_CALL(*on_done, Call(absl::OkStatus()));
+  EXPECT_CALL(control_endpoint_, Write).WillOnce(Return(true));
+  EXPECT_CALL(data_endpoint_, Write).WillOnce(Return(true));
+  auto activity = MakeActivity(
+      Seq(
+          // Concurrently: send message into the pipe, and receive from the
+          // pipe.
+          Join(Seq(pipe_client_to_server_messages_.sender.Push(
+                       std::move(message)),
+                   [this] {
+                     this->pipe_client_to_server_messages_.sender.Close();
+                     return absl::OkStatus();
+                   }),
+               Seq(client_transport_.AddStream(std::move(*args)),
+                   []() {
+                     std::cout << "\n return OK 1. ";
+                     fflush(stdout);
+                     return absl::OkStatus();
+                   })),
+          // Once complete, verify successful sending and the received value.
+          []() {
+            // TODO(unknown): verify results.
+            std::cout << "\n return OK 2. ";
             fflush(stdout);
-            on_done->Call(std::move(status));
-             }
-        );
-    // absl::SleepFor(absl::Seconds(5));
-    std::cout << "\n exit" ;
-    fflush(stdout);
+            return absl::OkStatus();
+          }),
+      InlineWakeupScheduler(), [on_done](absl::Status status) {
+        std::cout << "\n test on done: " << status.ToString();
+        fflush(stdout);
+        on_done->Call(std::move(status));
+      });
+  // absl::SleepFor(absl::Seconds(5));
+  std::cout << "\n exit";
+  fflush(stdout);
 }
 
 }  // namespace testing

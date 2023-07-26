@@ -22,25 +22,24 @@
 
 #include <initializer_list>
 #include <iostream>
+#include <memory>
+#include <string>
 #include <utility>
 
 #include "absl/base/thread_annotations.h"
 #include "absl/status/status.h"
-#include "absl/types/optional.h"
-#include "absl/types/variant.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 
 #include "src/core/ext/transport/chaotic_good/frame.h"
 #include "src/core/lib/channel/channel_args.h"
 #include "src/core/lib/gprpp/sync.h"
 #include "src/core/lib/promise/activity.h"
-#include "src/core/lib/promise/loop.h"
-#include "src/core/lib/promise/join.h"
+#include "src/core/lib/promise/for_each.h"
 #include "src/core/lib/promise/mpsc.h"
 #include "src/core/lib/promise/pipe.h"
-#include "src/core/lib/promise/map.h"
-#include "src/core/lib/promise/for_each.h"
-#include "src/core/lib/promise/poll.h"
 #include "src/core/lib/promise/seq.h"
+#include "src/core/lib/slice/slice_buffer.h"
 #include "src/core/lib/transport/promise_endpoint.h"
 #include "src/core/lib/transport/transport.h"
 
@@ -54,11 +53,12 @@ class ClientTransport {
                   PromiseEndpoint&& data_endpoint_);
   ~ClientTransport() {
     std::cout << "\n destruct client transport";
-            fflush(stdout);
+    fflush(stdout);
     if (writer_ != nullptr) {
-        std::cout << "\n destruct writer " ;
-            fflush(stdout);
-        writer_.get_deleter();}
+      std::cout << "\n destruct writer ";
+      fflush(stdout);
+      writer_.get_deleter();
+    }
   }
   auto AddStream(CallArgs call_args) {
     // At this point, the connection is set up.
@@ -72,37 +72,44 @@ class ClientTransport {
     }
     // const uint32_t stream_id = initial_frame->stream_id;
     // bool reach_end_of_stream = initial_frame->end_of_stream;
-    
-    // TODO(): change to Loop() or ForEach() to send all messages in client_to_server_message.
-    return ForEach(std::move(*call_args.client_to_server_messages), 
-    [this, initial_frame](MessageHandle result) { 
-        MpscSender<FrameInterface*> outgoing_frames =
-        this->outgoing_frames_.MakeSender();
-        std::cout << "\n for each get message: " << result->payload()->JoinIntoString();
-                fflush(stdout);
-                initial_frame->message = std::move(result);
-                std::cout << "\n move result length: " << initial_frame->message->payload()->Length();
-                fflush(stdout);
-            // if (result.has_value()) {
-            //     std::cout << "\n for each get message: " << result.value()->payload()->JoinIntoString();
-            //     fflush(stdout);
-            //     initial_frame->message = std::move(*result);
-            //     std::cout << "\n move result length: " << initial_frame->message->payload()->Length();
-            //     fflush(stdout);
-            //     initial_frame->end_of_stream = false;
-            // } else {
-            //     initial_frame->end_of_stream = true;
-            // }
-            // initial_frame.message = std::move(result);
-            // reach_end_of_stream = initial_frame.end_of_stream;
-            // // // ClientFrame cast_frame = ClientFrame(std::move(initial_frame));
-            return Seq(outgoing_frames.Send(initial_frame.get()),[this]{
-                std::cout << "\n outgoing_frames send finish: ";
-                fflush(stdout);
-                absl::SleepFor(absl::Seconds(5));
-                return absl::OkStatus();});
-            // return outgoing_frames.Send(&initial_frame);
-        });
+
+    // TODO(): change to Loop() or ForEach() to send all messages in
+    // client_to_server_message.
+    return ForEach(std::move(*call_args.client_to_server_messages),
+                   [this, initial_frame](MessageHandle result) {
+                     MpscSender<FrameInterface*> outgoing_frames =
+                         this->outgoing_frames_.MakeSender();
+                     std::cout << "\n for each get message: "
+                               << result->payload()->JoinIntoString();
+                     fflush(stdout);
+                     initial_frame->message = std::move(result);
+                     std::cout << "\n move result length: "
+                               << initial_frame->message->payload()->Length();
+                     fflush(stdout);
+                     // if (result.has_value()) {
+                     //     std::cout << "\n for each get message: " <<
+                     //     result.value()->payload()->JoinIntoString();
+                     //     fflush(stdout);
+                     //     initial_frame->message = std::move(*result);
+                     //     std::cout << "\n move result length: " <<
+                     //     initial_frame->message->payload()->Length();
+                     //     fflush(stdout);
+                     //     initial_frame->end_of_stream = false;
+                     // } else {
+                     //     initial_frame->end_of_stream = true;
+                     // }
+                     // initial_frame.message = std::move(result);
+                     // reach_end_of_stream = initial_frame.end_of_stream;
+                     // // // ClientFrame cast_frame =
+                     // ClientFrame(std::move(initial_frame));
+                     return Seq(outgoing_frames.Send(initial_frame.get()), [] {
+                       std::cout << "\n outgoing_frames send finish: ";
+                       fflush(stdout);
+                       absl::SleepFor(absl::Seconds(5));
+                       return absl::OkStatus();
+                     });
+                     // return outgoing_frames.Send(&initial_frame);
+                   });
   }
 
  private:

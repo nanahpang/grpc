@@ -21,24 +21,20 @@
 #include <tuple>
 
 #include "absl/status/statusor.h"
-#include "absl/types/variant.h"
-#include "frame.h"
 
 #include <grpc/event_engine/event_engine.h>
 #include <grpc/slice.h>
-#include <grpc/support/log.h>
 
 #include "src/core/ext/transport/chaotic_good/frame.h"
 #include "src/core/ext/transport/chaotic_good/frame_header.h"
 #include "src/core/ext/transport/chttp2/transport/hpack_encoder.h"
 #include "src/core/lib/promise/activity.h"
+#include "src/core/lib/promise/detail/basic_join.h"
+#include "src/core/lib/promise/detail/basic_seq.h"
 #include "src/core/lib/promise/event_engine_wakeup_scheduler.h"
 #include "src/core/lib/promise/join.h"
-#include "src/core/lib/promise/map.h"
 #include "src/core/lib/promise/loop.h"
-#include "src/core/lib/promise/poll.h"
 #include "src/core/lib/slice/slice.h"
-#include "src/core/lib/gprpp/match.h"
 #include "src/core/lib/slice/slice_buffer.h"
 #include "src/core/lib/slice/slice_internal.h"
 #include "src/core/lib/transport/promise_endpoint.h"
@@ -53,11 +49,14 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
   writer_ = MakeActivity(
       Loop(Seq(
           outgoing_frames_.Next(),
-          [hpack_compressor, &control_endpoint, &data_endpoint](FrameInterface* frame){
+          [hpack_compressor, &control_endpoint,
+           &data_endpoint](FrameInterface* frame) {
             std::cout << "\n frame address " << frame;
             fflush(stdout);
-            auto control_endpoint_buffer = frame->Serialize(hpack_compressor.get());
-            std::cout << "\n frame serialize length: " << control_endpoint_buffer.Length();
+            auto control_endpoint_buffer =
+                frame->Serialize(hpack_compressor.get());
+            std::cout << "\n frame serialize length: "
+                      << control_endpoint_buffer.Length();
             fflush(stdout);
             FrameHeader frame_header =
                 FrameHeader::Parse(
@@ -65,7 +64,8 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
                         control_endpoint_buffer.c_slice_buffer()->slices[0])))
                     .value();
             SliceBuffer data_endpoint_buffer;
-            std::cout << "\n frame header parse stream: " << frame_header.stream_id;
+            std::cout << "\n frame header parse stream: "
+                      << frame_header.stream_id;
             fflush(stdout);
             // Handle data endpoint buffer based on the frame type.
             switch (frame_header.type) {
@@ -73,21 +73,25 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
                 // No data will be sent on data endpoint;
                 break;
               case FrameType::kFragment: {
-                std::cout << "\n message padding size: " << frame_header.message_padding;
+                std::cout << "\n message padding size: "
+                          << frame_header.message_padding;
                 fflush(stdout);
                 uint8_t message_padding_size = frame_header.message_padding;
                 std::string message_padding(message_padding_size, '0');
                 Slice slice(grpc_slice_from_cpp_string(message_padding));
                 data_endpoint_buffer.Append(std::move(slice));
-                
+
                 auto message = std::move(
                     static_cast<ClientFragmentFrame*>(frame)->message);
-                    std::cout << "\n data buffer append: " << message->payload()->Length();
+                std::cout << "\n data buffer append: "
+                          << message->payload()->Length();
                 fflush(stdout);
                 frame_header.message_length = message->payload()->Length();
                 message->payload()->MoveFirstNBytesIntoSliceBuffer(
                     frame_header.message_length, data_endpoint_buffer);
-                std::cout << "\n data frame message length " << frame_header.message_length << " / " << message->payload()->Length();
+                std::cout << "\n data frame message length "
+                          << frame_header.message_length << " / "
+                          << message->payload()->Length();
                 break;
               }
               case FrameType::kCancel:
@@ -101,24 +105,25 @@ ClientTransport::ClientTransport(const ChannelArgs& channel_args,
                      data_endpoint.Write(std::move(data_endpoint_buffer))),
                 [](std::tuple<absl::StatusOr<SliceBuffer>,
                               absl::StatusOr<SliceBuffer>>
-                       ret) -> LoopCtl<absl::Status>{
-                  if (!(std::get<0>(ret).status().ok() || std::get<1>(ret).status().ok())) {
+                       ret) -> LoopCtl<absl::Status> {
+                  if (!(std::get<0>(ret).status().ok() ||
+                        std::get<1>(ret).status().ok())) {
                     // TODO(ladynana): better error handling when writes failed.
-                    std::cout << "\n writer_ failed ret 1: " << std::get<0>(ret).status().ToString();
+                    std::cout << "\n writer_ failed ret 1: "
+                              << std::get<0>(ret).status().ToString();
                     fflush(stdout);
                     // return absl::InternalError("Endpoint Write failed.");
                   }
                   return Continue();
                 });
             // return absl::OkStatus();
-            })),
+          })),
       EventEngineWakeupScheduler(
           grpc_event_engine::experimental::CreateEventEngine()),
-      [](absl::Status status) { 
+      [](absl::Status status) {
         std::cout << "\n writer_ on done." << status.ok();
-            fflush(stdout);
-
-            });
+        fflush(stdout);
+      });
 }
 
 }  // namespace chaotic_good
