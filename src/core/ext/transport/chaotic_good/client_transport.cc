@@ -31,7 +31,6 @@
 #include "src/core/lib/gprpp/match.h"
 #include "src/core/lib/promise/activity.h"
 #include "src/core/lib/promise/detail/basic_join.h"
-#include "src/core/lib/promise/detail/basic_seq.h"
 #include "src/core/lib/promise/event_engine_wakeup_scheduler.h"
 #include "src/core/lib/promise/join.h"
 #include "src/core/lib/promise/loop.h"
@@ -52,51 +51,56 @@ ClientTransport::ClientTransport(
   auto hpack_compressor = std::make_shared<HPackCompressor>();
   writer_ = MakeActivity(
       Loop([hpack_compressor, this]() mutable {
-        return Seq(
-            this->outgoing_frames_->Next(),
-            [hpack_compressor, this](ClientFrame client_frame) {
-                auto control_endpoint_buffer = std::make_shared<SliceBuffer>();
-                auto data_endpoint_buffer = std::make_shared<SliceBuffer>();
-                MatchMutable(&client_frame,
-                [hpack_compressor, control_endpoint_buffer = control_endpoint_buffer.get(), data_endpoint_buffer = data_endpoint_buffer.get()](ClientFragmentFrame* frame) mutable{
-                    control_endpoint_buffer->Append(frame->Serialize(hpack_compressor.get()));
-                    FrameHeader frame_header =
-                        FrameHeader::Parse(
-                            reinterpret_cast<const uint8_t*>(
-                                grpc_slice_to_c_string(
-                                    control_endpoint_buffer->c_slice_buffer()
-                                        ->slices[0])))
-                            .value();
-                    std::string message_padding(frame_header.message_padding,
-                                                '0');
-                    Slice slice(grpc_slice_from_cpp_string(message_padding));
-                    // Append message payload to data_endpoint_buffer.
-                    data_endpoint_buffer->Append(std::move(slice));
-                    // Append message payload to data_endpoint_buffer.
-                    frame->message->payload()->MoveFirstNBytesIntoSliceBuffer(
-                        frame->message->payload()->Length(), *data_endpoint_buffer);
-                },[hpack_compressor, control_endpoint_buffer = control_endpoint_buffer.get()](CancelFrame* frame) mutable{
-                    control_endpoint_buffer->Append(frame->Serialize(hpack_compressor.get()));
-                });
-              return Seq(Join(this->control_endpoint_->Write(
-                                        std::move(*control_endpoint_buffer)),
-                                    this->data_endpoint_->Write(
-                                        std::move(*data_endpoint_buffer))),
-                               [](std::tuple<absl::Status, absl::Status>
-                                      ret) -> LoopCtl<absl::Status> {
-                                 std::cout << "\n get next frame. ";
-                                 fflush(stdout);
-                                 if (!(std::get<0>(ret).ok() ||
-                                       std::get<1>(ret).ok())) {
-                                   // TODO(ladynana): better error handling when
-                                   // writes failed.
-                                   
-                                   return absl::InternalError(
-                                       "Endpoint Write failed.");
-                                 }
-                                 return Continue();
-                               });
-            });
+        return Seq(this->outgoing_frames_->Next(), [hpack_compressor,
+                                                    this](ClientFrame
+                                                              client_frame) {
+          auto control_endpoint_buffer = std::make_shared<SliceBuffer>();
+          auto data_endpoint_buffer = std::make_shared<SliceBuffer>();
+          MatchMutable(
+              &client_frame,
+              [hpack_compressor,
+               control_endpoint_buffer = control_endpoint_buffer.get(),
+               data_endpoint_buffer = data_endpoint_buffer.get()](
+                  ClientFragmentFrame* frame) mutable {
+                control_endpoint_buffer->Append(
+                    frame->Serialize(hpack_compressor.get()));
+                FrameHeader frame_header =
+                    FrameHeader::Parse(
+                        reinterpret_cast<const uint8_t*>(grpc_slice_to_c_string(
+                            control_endpoint_buffer->c_slice_buffer()
+                                ->slices[0])))
+                        .value();
+                std::string message_padding(frame_header.message_padding, '0');
+                Slice slice(grpc_slice_from_cpp_string(message_padding));
+                // Append message payload to data_endpoint_buffer.
+                data_endpoint_buffer->Append(std::move(slice));
+                // Append message payload to data_endpoint_buffer.
+                frame->message->payload()->MoveFirstNBytesIntoSliceBuffer(
+                    frame->message->payload()->Length(), *data_endpoint_buffer);
+              },
+              [hpack_compressor,
+               control_endpoint_buffer =
+                   control_endpoint_buffer.get()](CancelFrame* frame) mutable {
+                control_endpoint_buffer->Append(
+                    frame->Serialize(hpack_compressor.get()));
+              });
+          return Seq(Join(this->control_endpoint_->Write(
+                              std::move(*control_endpoint_buffer)),
+                          this->data_endpoint_->Write(
+                              std::move(*data_endpoint_buffer))),
+                     [](std::tuple<absl::Status, absl::Status> ret)
+                         -> LoopCtl<absl::Status> {
+                       std::cout << "\n get next frame. ";
+                       fflush(stdout);
+                       if (!(std::get<0>(ret).ok() || std::get<1>(ret).ok())) {
+                         // TODO(ladynana): better error handling when
+                         // writes failed.
+
+                         return absl::InternalError("Endpoint Write failed.");
+                       }
+                       return Continue();
+                     });
+        });
       }),
       EventEngineWakeupScheduler(
           grpc_event_engine::experimental::CreateEventEngine()),
