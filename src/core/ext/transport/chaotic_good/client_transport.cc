@@ -16,6 +16,8 @@
 
 #include "src/core/ext/transport/chaotic_good/client_transport.h"
 
+#include <stdlib.h>
+
 #include <memory>
 #include <string>
 #include <tuple>
@@ -63,20 +65,21 @@ ClientTransport::ClientTransport(
              &data_endpoint_buffer](ClientFragmentFrame* frame) mutable {
               control_endpoint_buffer.Append(
                   frame->Serialize(hpack_compressor.get()));
-              if(frame->message != nullptr){
-                 char* header_string = grpc_slice_to_c_string(
-                          control_endpoint_buffer.c_slice_buffer()->slices[0]);
-                 auto frame_header= FrameHeader::Parse(
-                      reinterpret_cast<const uint8_t*>(header_string))
-                      .value();
+              if (frame->message != nullptr) {
+                char* header_string = grpc_slice_to_c_string(
+                    control_endpoint_buffer.c_slice_buffer()->slices[0]);
+                auto frame_header =
+                    FrameHeader::Parse(
+                        reinterpret_cast<const uint8_t*>(header_string))
+                        .value();
                 free(header_string);
-              std::string message_padding(frame_header.message_padding, '0');
-              Slice slice(grpc_slice_from_cpp_string(message_padding));
-              // Append message payload to data_endpoint_buffer.
-              data_endpoint_buffer.Append(std::move(slice));
-              // Append message payload to data_endpoint_buffer.
-              frame->message->payload()->MoveFirstNBytesIntoSliceBuffer(
-                  frame->message->payload()->Length(), data_endpoint_buffer);
+                std::string message_padding(frame_header.message_padding, '0');
+                Slice slice(grpc_slice_from_cpp_string(message_padding));
+                // Append message payload to data_endpoint_buffer.
+                data_endpoint_buffer.Append(std::move(slice));
+                // Append message payload to data_endpoint_buffer.
+                frame->message->payload()->MoveFirstNBytesIntoSliceBuffer(
+                    frame->message->payload()->Length(), data_endpoint_buffer);
               }
             },
             [hpack_compressor,
