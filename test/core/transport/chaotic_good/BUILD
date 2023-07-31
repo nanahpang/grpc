@@ -104,6 +104,7 @@ grpc_cc_test(
         "//src/core:slice",
         "//src/core:slice_buffer",
         "//test/core/event_engine/fuzzing_event_engine",
+        "//test/core/event_engine/fuzzing_event_engine:fuzzing_event_engine_proto",
         "//test/core/promise:test_wakeup_schedulers",
     ],
 )
