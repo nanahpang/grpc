@@ -5941,6 +5941,7 @@ grpc_cc_library(
         "//:gpr_platform",
         "//:grpc_base",
         "//:hpack_encoder",
+        "//:hpack_parser",
     ],
 )
 

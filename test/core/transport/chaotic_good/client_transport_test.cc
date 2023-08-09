@@ -148,6 +148,8 @@ TEST_F(ClientTransportTest, AddOneStream) {
   EXPECT_CALL(on_done, Call(absl::OkStatus()));
   EXPECT_CALL(control_endpoint_, Write).WillOnce(Return(true));
   EXPECT_CALL(data_endpoint_, Write).WillOnce(Return(true));
+  EXPECT_CALL(control_endpoint_, Read).WillOnce(Return(true));
+  EXPECT_CALL(data_endpoint_, Read).WillOnce(Return(true));
   auto activity = MakeActivity(
       Seq(
           // Concurrently: send message into the pipe, and receive from the
