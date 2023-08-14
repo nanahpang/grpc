@@ -8082,6 +8082,7 @@ targets:
   deps:
   - absl/status:status
   - absl/status:statusor
+  - absl/strings:str_format
   - absl/strings:strings
   - absl/types:variant
 - name: frame_test

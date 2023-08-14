@@ -127,23 +127,23 @@ ClientTransport::ClientTransport(
       [this](absl::StatusOr<SliceBuffer> read_buffer) mutable {
         // TODO(ladynana): handle read failure here.
         GPR_ASSERT(read_buffer.ok());
-        char* header_string = grpc_slice_to_c_string(
-                    read_buffer->c_slice_buffer()->slices[0]);
+        char* header_string =
+            grpc_slice_to_c_string(read_buffer->c_slice_buffer()->slices[0]);
         std::cout << "\n parse frame header" << header_string;
         fflush(stdout);
         frame_header_ =
-            FrameHeader::Parse(
-                reinterpret_cast<const uint8_t*>(header_string))
+            FrameHeader::Parse(reinterpret_cast<const uint8_t*>(header_string))
                 .value();
         free(header_string);
         std::cout << "\n frame header " << frame_header_.DebugString();
         fflush(stdout);
         // Read header and trailers from control endpoint.
         // Read message padding and message from data endpoint.
-        return Join(control_endpoint_->Read(frame_header_.GetFrameLength()),
-                    Seq(data_endpoint_->Read(frame_header_.message_padding),
-                        [this]{ 
-                          return data_endpoint_->Read(frame_header_.message_length);}));
+        return Join(
+            control_endpoint_->Read(frame_header_.GetFrameLength()),
+            Seq(data_endpoint_->Read(frame_header_.message_padding), [this] {
+              return data_endpoint_->Read(frame_header_.message_length);
+            }));
       },
       // Finish reads and send receive frame to incoming_frames.
       [this, hpack_parser](
@@ -154,15 +154,18 @@ ClientTransport::ClientTransport(
         data_endpoint_read_buffer_ = std::move(*std::get<1>(ret));
         ServerFragmentFrame frame;
         // Deserialize frame from read buffer.
-        ExecCtx exec_ctx;  // Initialized to get this_cpu() info in global_stat().
+        ExecCtx
+            exec_ctx;  // Initialized to get this_cpu() info in global_stat().
         auto status = frame.Deserialize(hpack_parser.get(), frame_header_,
                                         control_endpoint_read_buffer_);
         frame.message->payload()->Append(data_endpoint_read_buffer_);
         // auto incoming_frames = incoming_frames_.MakeSender();
-                std::cout << "\n read finish ";
+        std::cout << "\n read finish ";
         fflush(stdout);
-        return [frame = std::move(frame), incoming_frames = incoming_frames_.MakeSender()]() mutable{ 
-          return incoming_frames.Send(ServerFrame(std::move(frame)));};
+        return [frame = std::move(frame),
+                incoming_frames = incoming_frames_.MakeSender()]() mutable {
+          return incoming_frames.Send(ServerFrame(std::move(frame)));
+        };
       },
       // Check if read_loop_ should continue.
       []() -> LoopCtl<absl::Status> {
@@ -171,10 +174,9 @@ ClientTransport::ClientTransport(
         //   // Send incoming frames successfully.
         //   return Continue();
         // } else {
-          
+
         // }
-      }
-      ));
+      }));
   reader_ = MakeActivity(
       // Continuously read next incoming frames from promise endpoints.
       std::move(read_loop), EventEngineWakeupScheduler(event_engine_),

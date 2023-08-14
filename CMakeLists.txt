@@ -12437,6 +12437,7 @@ target_link_libraries(frame_header_test
   ${_gRPC_ALLTARGETS_LIBRARIES}
   absl::status
   absl::statusor
+  absl::str_format
   absl::strings
   absl::variant
 )
