@@ -19,6 +19,7 @@
 #include <cstdint>
 
 #include "absl/status/status.h"
+#include "absl/strings/str_format.h"
 
 namespace grpc_core {
 namespace chaotic_good {
@@ -71,6 +72,13 @@ uint32_t FrameHeader::GetFrameLength() const {
   // through different channel. So not included in the frame length calculation.
   uint32_t frame_length = header_length + trailer_length;
   return frame_length;
+}
+
+std::string FrameHeader::DebugString() const {
+  // In chaotic-good transport design, message and message padding are sent
+  // through different channel. So not included in the frame length calculation.
+  std::string debug_string = absl::StrFormat("frame type: %d, frame flags: %d, frame header length: %d, message pading: %d, message length: %d, frame length: %d \n", type, flags.ToInt<uint32_t>(), header_length, message_padding, message_length, GetFrameLength()); 
+  return debug_string;
 }
 
 }  // namespace chaotic_good

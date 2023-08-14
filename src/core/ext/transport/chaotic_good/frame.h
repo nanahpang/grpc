@@ -92,6 +92,7 @@ struct ServerFragmentFrame final : public FrameInterface {
   uint32_t stream_id;
   ServerMetadataHandle headers;
   ServerMetadataHandle trailers;
+  MessageHandle message;
 
   bool operator==(const ServerFragmentFrame& other) const {
     return stream_id == other.stream_id && EqHdl(headers, other.headers) &&

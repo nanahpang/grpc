@@ -47,6 +47,8 @@ struct FrameHeader {
   void Serialize(uint8_t* data) const;
   // Compute frame sizes from the header.
   uint32_t GetFrameLength() const;
+  // Debug string.
+  std::string DebugString() const;
 
   bool operator==(const FrameHeader& h) const {
     return type == h.type && flags == h.flags && stream_id == h.stream_id &&

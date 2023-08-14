@@ -16,9 +16,9 @@
 #define GRPC_SRC_CORE_EXT_TRANSPORT_CHAOTIC_GOOD_CLIENT_TRANSPORT_H
 
 #include <grpc/support/port_platform.h>
-
 #include <stdint.h>
-
+#include <grpc/event_engine/event_engine.h>
+#include <stddef.h>
 #include <initializer_list>  // IWYU pragma: keep
 #include <memory>
 #include <type_traits>
@@ -27,13 +27,13 @@
 #include "absl/base/thread_annotations.h"
 #include "absl/status/status.h"
 #include "absl/types/variant.h"
-
-#include <grpc/event_engine/event_engine.h>
-
+#include "src/core/ext/transport/chaotic_good/frame_header.h"
 #include "src/core/ext/transport/chaotic_good/frame.h"
 #include "src/core/lib/gprpp/sync.h"
 #include "src/core/lib/promise/activity.h"
 #include "src/core/lib/promise/for_each.h"
+#include "src/core/lib/promise/if.h"
+#include "src/core/lib/promise/loop.h"
 #include "src/core/lib/promise/mpsc.h"
 #include "src/core/lib/promise/pipe.h"
 #include "src/core/lib/promise/seq.h"
@@ -53,6 +53,9 @@ class ClientTransport {
   ~ClientTransport() {
     if (writer_ != nullptr) {
       writer_.reset();
+    }
+    if (reader_ != nullptr) {
+      reader_.reset();
     }
   }
   auto AddStream(CallArgs call_args) {
@@ -88,13 +91,44 @@ class ClientTransport {
                         }
                         return absl::OkStatus();
                       });
-                }));
+                }),
+        // Continuously receive incoming frames and save results to call_args. 
+        Loop(
+          Seq(
+          // Receive incoming frame.
+          this->incoming_frames_.Next(),
+          // Save incomming frame results to call_args.
+          [server_initial_metadata = call_args.server_initial_metadata,
+           server_to_client_message = call_args.server_to_client_messages](ServerFrame server_frame) mutable {
+            std::cout<< "\n get next frame";
+            fflush(stdout);
+            ServerFragmentFrame frame = std::move(absl::get<ServerFragmentFrame>(server_frame));
+            return Seq(
+              If((frame.headers != nullptr), 
+              [server_initial_metadata, headers = std::move(frame.headers)]()mutable{
+                return server_initial_metadata->Push(std::move(headers));},
+              []{return false;}),
+              If((frame.message != nullptr), 
+              [server_to_client_message, message = std::move(frame.message)]()mutable{
+                return server_to_client_message->Push(std::move(message));},
+              []{return false;}),
+              If((frame.trailers != nullptr), 
+              [trailers = std::move(frame.trailers)]()mutable -> LoopCtl<absl::Status>{
+                return absl::OkStatus();},
+              []()-> LoopCtl<absl::Status>{return Continue();})
+              );}
+              ))
+            
+    );
   }
 
  private:
   // Max buffer is set to 4, so that for stream writes each time it will queue
   // at most 2 frames.
   MpscReceiver<ClientFrame> outgoing_frames_;
+  // Max buffer is set to 4, so that for stream reads each time it will queue
+  // at most 2 frames.
+  MpscReceiver<ServerFrame> incoming_frames_;
   Mutex mu_;
   uint32_t next_stream_id_ ABSL_GUARDED_BY(mu_) = 1;
   ActivityPtr writer_;
@@ -103,8 +137,14 @@ class ClientTransport {
   std::unique_ptr<PromiseEndpoint> data_endpoint_;
   SliceBuffer control_endpoint_write_buffer_;
   SliceBuffer data_endpoint_write_buffer_;
+  SliceBuffer control_endpoint_read_buffer_;
+  SliceBuffer data_endpoint_read_buffer_;
   // Use to synchronize writer_ and reader_ activity with outside activities;
   std::shared_ptr<grpc_event_engine::experimental::EventEngine> event_engine_;
+  // Frame header size.
+  const size_t frame_header_size = 24;
+  // Frame header read from control endpoint.
+  FrameHeader frame_header_;
 };
 
 }  // namespace chaotic_good

@@ -5771,6 +5771,7 @@ grpc_cc_library(
     external_deps = [
         "absl/status",
         "absl/status:statusor",
+        "absl/strings:str_format",
     ],
     deps = [
         "bitset",
@@ -5927,6 +5928,7 @@ grpc_cc_library(
         "chaotic_good_frame",
         "chaotic_good_frame_header",
         "event_engine_wakeup_scheduler",
+        "if",
         "for_each",
         "grpc_promise_endpoint",
         "join",
@@ -5941,6 +5943,8 @@ grpc_cc_library(
         "//:gpr_platform",
         "//:grpc_base",
         "//:hpack_encoder",
+        "//:hpack_parser",
+        "//:exec_ctx",
     ],
 )
 
