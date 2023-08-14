@@ -32,6 +32,7 @@
 #include "src/core/lib/gprpp/sync.h"
 #include "src/core/lib/promise/activity.h"
 #include "src/core/lib/promise/for_each.h"
+#include "src/core/lib/promise/if.h"
 #include "src/core/lib/promise/loop.h"
 #include "src/core/lib/promise/mpsc.h"
 #include "src/core/lib/promise/pipe.h"
@@ -52,6 +53,9 @@ class ClientTransport {
   ~ClientTransport() {
     if (writer_ != nullptr) {
       writer_.reset();
+    }
+    if (reader_ != nullptr) {
+      reader_.reset();
     }
   }
   auto AddStream(CallArgs call_args) {
@@ -88,30 +92,34 @@ class ClientTransport {
                         return absl::OkStatus();
                       });
                 }),
-        // Continuously receive incoming frames and save results to call_args.
+        // Continuously receive incoming frames and save results to call_args. 
         Loop(
           Seq(
           // Receive incoming frame.
           this->incoming_frames_.Next(),
           // Save incomming frame results to call_args.
-          [server_initial_metadata = std::move(*call_args.server_initial_metadata),
-           server_to_client_message = std::move(*call_args.server_to_client_messages)](ServerFrame server_frame) mutable -> LoopCtl<absl::Status> {
+          [server_initial_metadata = call_args.server_initial_metadata,
+           server_to_client_message = call_args.server_to_client_messages](ServerFrame server_frame) mutable {
+            std::cout<< "\n get next frame";
+            fflush(stdout);
             ServerFragmentFrame frame = std::move(absl::get<ServerFragmentFrame>(server_frame));
-            if(frame.headers != nullptr) {
-              server_initial_metadata.Push(std::move(frame.headers));
-            }
-            if (frame.message != nullptr) {
-              server_to_client_message.Push(std::move(frame.message));
-            }
-            if (frame.trailers != nullptr) {
-              // Receive final incoming frames
-              return absl::OkStatus();
-            }else {
-              return Continue();
-            }
-          }
-        ))
-        );
+            return Seq(
+              If((frame.headers != nullptr), 
+              [server_initial_metadata, headers = std::move(frame.headers)]()mutable{
+                return server_initial_metadata->Push(std::move(headers));},
+              []{return false;}),
+              If((frame.message != nullptr), 
+              [server_to_client_message, message = std::move(frame.message)]()mutable{
+                return server_to_client_message->Push(std::move(message));},
+              []{return false;}),
+              If((frame.trailers != nullptr), 
+              [trailers = std::move(frame.trailers)]()mutable -> LoopCtl<absl::Status>{
+                return absl::OkStatus();},
+              []()-> LoopCtl<absl::Status>{return Continue();})
+              );}
+              ))
+            
+    );
   }
 
  private:

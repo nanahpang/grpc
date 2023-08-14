@@ -33,6 +33,7 @@
 #include "src/core/ext/transport/chttp2/transport/hpack_encoder.h"
 #include "src/core/ext/transport/chttp2/transport/hpack_parser.h"
 #include "src/core/lib/gprpp/match.h"
+#include "src/core/lib/iomgr/exec_ctx.h"
 #include "src/core/lib/promise/activity.h"
 #include "src/core/lib/promise/detail/basic_seq.h"
 #include "src/core/lib/promise/event_engine_wakeup_scheduler.h"
@@ -72,6 +73,8 @@ ClientTransport::ClientTransport(
               if (frame->message != nullptr) {
                 char* header_string = grpc_slice_to_c_string(
                     control_endpoint_write_buffer_.c_slice_buffer()->slices[0]);
+                std::cout << "\n parse frame header" << header_string;
+                fflush(stdout);
                 auto frame_header =
                     FrameHeader::Parse(
                         reinterpret_cast<const uint8_t*>(header_string))
@@ -119,22 +122,31 @@ ClientTransport::ClientTransport(
       });
   auto read_loop = Loop(Seq(
       // Read frame header from control endpoint.
-      control_endpoint_->Read(frame_header_size),
+      this->control_endpoint_->Read(frame_header_size),
       // Parse frame header and return.
       [this](absl::StatusOr<SliceBuffer> read_buffer) mutable {
         // TODO(ladynana): handle read failure here.
+        GPR_ASSERT(read_buffer.ok());
+        char* header_string = grpc_slice_to_c_string(
+                    read_buffer->c_slice_buffer()->slices[0]);
+        std::cout << "\n parse frame header" << header_string;
+        fflush(stdout);
         frame_header_ =
-            FrameHeader::Parse(reinterpret_cast<const uint8_t*>(
-                                   read_buffer.value().c_slice_buffer()))
+            FrameHeader::Parse(
+                reinterpret_cast<const uint8_t*>(header_string))
                 .value();
+        free(header_string);
+        std::cout << "\n frame header " << frame_header_.DebugString();
+        fflush(stdout);
         // Read header and trailers from control endpoint.
         // Read message padding and message from data endpoint.
         return Join(control_endpoint_->Read(frame_header_.GetFrameLength()),
                     Seq(data_endpoint_->Read(frame_header_.message_padding),
-                        data_endpoint_->Read(frame_header_.message_length)));
+                        [this]{ 
+                          return data_endpoint_->Read(frame_header_.message_length);}));
       },
       // Finish reads and send receive frame to incoming_frames.
-      [hpack_parser, this](
+      [this, hpack_parser](
           std::tuple<absl::StatusOr<SliceBuffer>, absl::StatusOr<SliceBuffer>>
               ret) mutable {
         // TODO(ladynana): handle read failure here.
@@ -142,21 +154,27 @@ ClientTransport::ClientTransport(
         data_endpoint_read_buffer_ = std::move(*std::get<1>(ret));
         ServerFragmentFrame frame;
         // Deserialize frame from read buffer.
+        ExecCtx exec_ctx;  // Initialized to get this_cpu() info in global_stat().
         auto status = frame.Deserialize(hpack_parser.get(), frame_header_,
                                         control_endpoint_read_buffer_);
         frame.message->payload()->Append(data_endpoint_read_buffer_);
-        auto incoming_frames = incoming_frames_.MakeSender();
-        return incoming_frames.Send(ServerFrame(std::move(frame)));
+        // auto incoming_frames = incoming_frames_.MakeSender();
+                std::cout << "\n read finish ";
+        fflush(stdout);
+        return [frame = std::move(frame), incoming_frames = incoming_frames_.MakeSender()]() mutable{ 
+          return incoming_frames.Send(ServerFrame(std::move(frame)));};
       },
       // Check if read_loop_ should continue.
-      [](bool ret) -> LoopCtl<absl::Status> {
-        if (ret) {
-          // Send incoming frames successfully.
-          return Continue();
-        } else {
-          return absl::InternalError("Send incoming frames failed.");
-        }
-      }));
+      []() -> LoopCtl<absl::Status> {
+        return absl::InternalError("Send incoming frames failed.");
+        // if (ret) {
+        //   // Send incoming frames successfully.
+        //   return Continue();
+        // } else {
+          
+        // }
+      }
+      ));
   reader_ = MakeActivity(
       // Continuously read next incoming frames from promise endpoints.
       std::move(read_loop), EventEngineWakeupScheduler(event_engine_),
