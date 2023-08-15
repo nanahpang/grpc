@@ -18,10 +18,13 @@
 
 #include <stdio.h>
 
+#include <algorithm>
 #include <memory>
 #include <tuple>
+#include <vector>
 
 #include "absl/functional/any_invocable.h"
+#include "absl/strings/str_format.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
