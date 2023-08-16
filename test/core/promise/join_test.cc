@@ -15,10 +15,13 @@
 #include "src/core/lib/promise/join.h"
 
 #include <tuple>
+#include <utility>
 
 #include "gtest/gtest.h"
 
+#include "src/core/lib/promise/loop.h"
 #include "src/core/lib/promise/poll.h"
+#include "src/core/lib/promise/seq.h"
 
 namespace grpc_core {
 
@@ -28,13 +31,17 @@ TEST(JoinTest, Join1) {
 }
 
 TEST(JoinTest, Join2) {
-  EXPECT_EQ(Join([] { return 3; }, [] { return 4; })(),
+  EXPECT_EQ(Seq(
+              Join([] { return 3; }, [] { return 4; }),
+              [](std::tuple<int, int> ret){return ret;})(),
             (Poll<std::tuple<int, int>>(std::make_tuple(3, 4))));
 }
 
 TEST(JoinTest, Join3) {
-  EXPECT_EQ(Join([] { return 3; }, [] { return 4; }, [] { return 5; })(),
-            (Poll<std::tuple<int, int, int>>(std::make_tuple(3, 4, 5))));
+  EXPECT_EQ(Loop(
+    Seq(Join([] { return 3; }, [] { return 4; }),
+        [](std::tuple<int, int> ret)->LoopCtl<std::tuple<int, int>>{return ret;}))(),
+            (Poll<std::tuple<int, int>>(std::make_tuple(3, 4))));
 }
 
 }  // namespace grpc_core
