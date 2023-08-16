@@ -17,6 +17,7 @@
 #include "src/core/ext/transport/chaotic_good/frame_header.h"
 
 #include <cstdint>
+#include <initializer_list>
 
 #include "absl/status/status.h"
 #include "absl/strings/str_format.h"
@@ -77,7 +78,11 @@ uint32_t FrameHeader::GetFrameLength() const {
 std::string FrameHeader::DebugString() const {
   // In chaotic-good transport design, message and message padding are sent
   // through different channel. So not included in the frame length calculation.
-  std::string debug_string = absl::StrFormat("frame type: %d, frame flags: %d, frame header length: %d, message pading: %d, message length: %d, frame length: %d \n", type, flags.ToInt<uint32_t>(), header_length, message_padding, message_length, GetFrameLength()); 
+  std::string debug_string = absl::StrFormat(
+      "frame type: %d, frame flags: %d, frame header length: %d, message "
+      "pading: %d, message length: %d, trailer_length %d, frame length: %d \n",
+      type, flags.ToInt<uint32_t>(), header_length, message_padding,
+      message_length, trailer_length, GetFrameLength());
   return debug_string;
 }
 

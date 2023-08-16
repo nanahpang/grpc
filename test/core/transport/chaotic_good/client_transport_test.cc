@@ -104,7 +104,10 @@ class ClientTransportTest : public ::testing::Test {
             fuzzing_event_engine::Actions())),
         arena_(MakeScopedArena(initial_arena_size, &memory_allocator_)),
         pipe_client_to_server_messages_(arena_.get()),
-        pipe_client_to_server_messages_second_(arena_.get()) {}
+        pipe_client_to_server_messages_second_(arena_.get()),
+        pipe_server_to_client_messages_(arena_.get()),
+        pipe_server_to_client_messages_second_(arena_.get()),
+        pipe_server_intial_metadata_(arena_.get()) {}
 
  private:
   size_t initial_arena_size = 1024;
@@ -117,11 +120,15 @@ class ClientTransportTest : public ::testing::Test {
   MockEndpoint& data_endpoint_;
   std::shared_ptr<grpc_event_engine::experimental::FuzzingEventEngine>
       event_engine_;
-//   ClientTransport client_transport_;
+  //   ClientTransport client_transport_;
   ScopedArenaPtr arena_;
   Pipe<MessageHandle> pipe_client_to_server_messages_;
   // Added for mutliple streams tests.
   Pipe<MessageHandle> pipe_client_to_server_messages_second_;
+  Pipe<MessageHandle> pipe_server_to_client_messages_;
+  // Added for mutliple streams tests.
+  Pipe<MessageHandle> pipe_server_to_client_messages_second_;
+  Pipe<ServerMetadataHandle> pipe_server_intial_metadata_;
 
   const absl::Status kDummyErrorStatus =
       absl::ErrnoToStatus(5566, "just an error");
@@ -129,58 +136,81 @@ class ClientTransportTest : public ::testing::Test {
 };
 
 TEST_F(ClientTransportTest, AddOneStream) {
-// Test frame: headers  (1 bytes), trailers (15 bytes), message padding (48 byte), message(16 bytes).
-const std::string frame_header = {static_cast<char>(0x80), 0x03, 0x00, 0x00, 
-0x01, 0x00, 0x00, 0x00, 
-0x01, 0x00, 0x00, 0x00,
-0x10, 0x00, 0x00, 0x00, 
-0x30, 0x00, 0x00, 0x00, 
-0x0f, 0x00, 0x00, 0x00};
-const std::string header = {0x01};
-const std::string message_padding = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-0x00, 0x00, 0x00, 0x00,0x00, 0x00, 0x00, 0x00,
-0x00, 0x00, 0x00, 0x00,0x00, 0x00, 0x00, 0x00,
-0x00, 0x00, 0x00, 0x00,0x00, 0x00, 0x00, 0x00,
-0x00, 0x00, 0x00, 0x00,0x00, 0x00, 0x00, 0x00,
-0x00, 0x00, 0x00, 0x00,0x00, 0x00, 0x00, 0x00,};
-const std::string messages = {0x10, 0x0b, 0x67, 0x72, 0x70, 0x63, 0x2d, 0x73, 
-0x74, 0x61, 0x74, 0x75, 0x73, 0x01, 0x30, 0x01};
- const std::string trailers = {0x10, 0x0b, 0x67, 0x72, 0x70, 0x63, 0x2d, 0x73, 
-0x74, 0x61, 0x74, 0x75, 0x73, 0x01, 0x30};
-Sequence s;
-EXPECT_CALL(control_endpoint_, Read)
-  .InSequence(s)
+  // Test frame: headers  (15 bytes), trailers (15 bytes), message padding (48
+  // byte), message(16 bytes).
+  const std::string frame_header = {static_cast<char>(0x80),
+                                    0x03,
+                                    0x00,
+                                    0x00,
+                                    0x01,
+                                    0x00,
+                                    0x00,
+                                    0x00,
+                                    0x0f,
+                                    0x00,
+                                    0x00,
+                                    0x00,
+                                    0x10,
+                                    0x00,
+                                    0x00,
+                                    0x00,
+                                    0x30,
+                                    0x00,
+                                    0x00,
+                                    0x00,
+                                    0x0f,
+                                    0x00,
+                                    0x00,
+                                    0x00};
+  const std::string header = {0x10, 0x0b, 0x67, 0x72, 0x70, 0x63, 0x2d, 0x73,
+                              0x74, 0x61, 0x74, 0x75, 0x73, 0x01, 0x30};
+  const std::string message_padding = {
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  };
+  const std::string messages = {0x10, 0x0b, 0x67, 0x72, 0x70, 0x63, 0x2d, 0x73,
+                                0x74, 0x61, 0x74, 0x75, 0x73, 0x01, 0x30, 0x01};
+  const std::string trailers = {0x10, 0x0b, 0x67, 0x72, 0x70, 0x63, 0x2d, 0x73,
+                                0x74, 0x61, 0x74, 0x75, 0x73, 0x01, 0x30};
+  Sequence s;
+  EXPECT_CALL(control_endpoint_, Read)
+      .InSequence(s)
       .WillOnce(WithArgs<1>(
-          [&frame_header](grpc_event_engine::experimental::SliceBuffer* buffer) {
+          [&frame_header](
+              grpc_event_engine::experimental::SliceBuffer* buffer) {
             // Schedule mock_endpoint to read buffer.
             grpc_event_engine::experimental::Slice slice(
                 grpc_slice_from_cpp_string(frame_header));
             buffer->Append(std::move(slice));
             return true;
           }));
-EXPECT_CALL(control_endpoint_, Read)
-  .InSequence(s)
+  EXPECT_CALL(control_endpoint_, Read)
+      .InSequence(s)
       .WillOnce(WithArgs<1>(
-          [&header, &trailers](grpc_event_engine::experimental::SliceBuffer* buffer) {
+          [&header,
+           &trailers](grpc_event_engine::experimental::SliceBuffer* buffer) {
             // Schedule mock_endpoint to read buffer.
             grpc_event_engine::experimental::Slice slice(
                 grpc_slice_from_cpp_string(header + trailers));
             buffer->Append(std::move(slice));
             return true;
           }));
-Sequence data_sequence;
-EXPECT_CALL(data_endpoint_, Read)
-  .InSequence(data_sequence)
+  Sequence data_sequence;
+  EXPECT_CALL(data_endpoint_, Read)
+      .InSequence(data_sequence)
       .WillOnce(WithArgs<1>(
-          [&message_padding](grpc_event_engine::experimental::SliceBuffer* buffer) {
+          [&message_padding](
+              grpc_event_engine::experimental::SliceBuffer* buffer) {
             // Schedule mock_endpoint to read buffer.
             grpc_event_engine::experimental::Slice slice(
                 grpc_slice_from_cpp_string(message_padding));
             buffer->Append(std::move(slice));
             return true;
           }));
-EXPECT_CALL(data_endpoint_, Read)
-  .InSequence(data_sequence)
+  EXPECT_CALL(data_endpoint_, Read)
+      .InSequence(data_sequence)
       .WillOnce(WithArgs<1>(
           [&messages](grpc_event_engine::experimental::SliceBuffer* buffer) {
             // Schedule mock_endpoint to read buffer.
@@ -193,22 +223,23 @@ EXPECT_CALL(data_endpoint_, Read)
   buffer.Append(Slice::FromCopiedString("test add stream."));
   auto message = arena_->MakePooled<Message>(std::move(buffer), 0);
   ClientMetadataHandle md;
-  auto args = CallArgs{
-      std::move(md), ClientInitialMetadataOutstandingToken::Empty(), nullptr,
-      nullptr,       &pipe_client_to_server_messages_.receiver,      nullptr};
+  auto args = CallArgs{std::move(md),
+                       ClientInitialMetadataOutstandingToken::Empty(),
+                       nullptr,
+                       &pipe_server_intial_metadata_.sender,
+                       &pipe_client_to_server_messages_.receiver,
+                       &pipe_server_to_client_messages_.sender};
   StrictMock<MockFunction<void(absl::Status)>> on_done;
   EXPECT_CALL(on_done, Call(absl::OkStatus()));
   EXPECT_CALL(control_endpoint_, Write).WillOnce(Return(true));
   EXPECT_CALL(data_endpoint_, Write).WillOnce(Return(true));
   ClientTransport client_transport_(
-            std::make_unique<PromiseEndpoint>(
-                std::unique_ptr<MockEndpoint>(control_endpoint_ptr_),
-                SliceBuffer()),
-            std::make_unique<PromiseEndpoint>(
-                std::unique_ptr<MockEndpoint>(data_endpoint_ptr_),
-                SliceBuffer()),
-            std::static_pointer_cast<
-                grpc_event_engine::experimental::EventEngine>(event_engine_));
+      std::make_unique<PromiseEndpoint>(
+          std::unique_ptr<MockEndpoint>(control_endpoint_ptr_), SliceBuffer()),
+      std::make_unique<PromiseEndpoint>(
+          std::unique_ptr<MockEndpoint>(data_endpoint_ptr_), SliceBuffer()),
+      std::static_pointer_cast<grpc_event_engine::experimental::EventEngine>(
+          event_engine_));
   auto activity = MakeActivity(
       Seq(
           // Concurrently: send message into the pipe, and receive from the
@@ -219,9 +250,23 @@ EXPECT_CALL(data_endpoint_, Read)
                      this->pipe_client_to_server_messages_.sender.Close();
                      return absl::OkStatus();
                    }),
-               Seq(client_transport_.AddStream(std::move(args)), [](){return absl::OkStatus();})),
+               Seq(client_transport_.AddStream(std::move(args)),
+                   [this]() {
+                     this->pipe_server_to_client_messages_.sender.Close();
+                     this->pipe_server_intial_metadata_.sender.Close();
+                     std::cout << "\n Add stream done ";
+                     fflush(stdout);
+                     return absl::OkStatus();
+                   }),
+               Seq(pipe_server_intial_metadata_.receiver.Next(),
+                   pipe_server_to_client_messages_.receiver.Next(),
+                   []() {
+                     std::cout << "\n Read message done ";
+                     fflush(stdout);
+                     return absl::OkStatus();
+                   })),
           // Once complete, verify successful sending and the received value.
-          [](const std::tuple<absl::Status, absl::Status>& ret) {
+          [](const std::tuple<absl::Status, absl::Status, absl::Status>& ret) {
             EXPECT_TRUE(std::get<0>(ret).ok());
             EXPECT_TRUE(std::get<1>(ret).ok());
             return absl::OkStatus();
@@ -240,18 +285,20 @@ EXPECT_CALL(data_endpoint_, Read)
 //   ClientMetadataHandle md;
 //   auto args = CallArgs{
 //       std::move(md), ClientInitialMetadataOutstandingToken::Empty(), nullptr,
-//       nullptr,       &pipe_client_to_server_messages_.receiver,      nullptr};
+//       nullptr,       &pipe_client_to_server_messages_.receiver, nullptr};
 //   StrictMock<MockFunction<void(absl::Status)>> on_done;
 //   EXPECT_CALL(on_done, Call(absl::OkStatus()));
 //   EXPECT_CALL(control_endpoint_, Write)
 //       .WillOnce(
-//           WithArgs<0>([this](absl::AnyInvocable<void(absl::Status)> on_write) {
+//           WithArgs<0>([this](absl::AnyInvocable<void(absl::Status)> on_write)
+//           {
 //             on_write(this->kDummyErrorStatus);
 //             return false;
 //           }));
 //   EXPECT_CALL(data_endpoint_, Write)
 //       .WillOnce(
-//           WithArgs<0>([this](absl::AnyInvocable<void(absl::Status)> on_write) {
+//           WithArgs<0>([this](absl::AnyInvocable<void(absl::Status)> on_write)
+//           {
 //             on_write(this->kDummyErrorStatus);
 //             return false;
 //           }));
@@ -288,12 +335,12 @@ EXPECT_CALL(data_endpoint_, Read)
 //   ClientMetadataHandle md;
 //   auto args = CallArgs{
 //       std::move(md), ClientInitialMetadataOutstandingToken::Empty(), nullptr,
-//       nullptr,       &pipe_client_to_server_messages_.receiver,      nullptr};
+//       nullptr,       &pipe_client_to_server_messages_.receiver, nullptr};
 //   StrictMock<MockFunction<void(absl::Status)>> on_done;
 //   EXPECT_CALL(on_done, Call(absl::OkStatus()));
-//   EXPECT_CALL(control_endpoint_, Write).Times(3).WillRepeatedly(Return(true));
-//   EXPECT_CALL(data_endpoint_, Write).Times(3).WillRepeatedly(Return(true));
-//   auto activity = MakeActivity(
+//   EXPECT_CALL(control_endpoint_,
+//   Write).Times(3).WillRepeatedly(Return(true)); EXPECT_CALL(data_endpoint_,
+//   Write).Times(3).WillRepeatedly(Return(true)); auto activity = MakeActivity(
 //       Seq(
 //           // Concurrently: send messages into the pipe, and receive from the
 //           // pipe.
@@ -328,15 +375,16 @@ EXPECT_CALL(data_endpoint_, Read)
 //   ClientMetadataHandle md;
 //   auto first_stream_args = CallArgs{
 //       std::move(md), ClientInitialMetadataOutstandingToken::Empty(), nullptr,
-//       nullptr,       &pipe_client_to_server_messages_.receiver,      nullptr};
+//       nullptr,       &pipe_client_to_server_messages_.receiver, nullptr};
 //   auto second_stream_args = CallArgs{
-//       std::move(md), ClientInitialMetadataOutstandingToken::Empty(),   nullptr,
-//       nullptr,       &pipe_client_to_server_messages_second_.receiver, nullptr};
+//       std::move(md), ClientInitialMetadataOutstandingToken::Empty(), nullptr,
+//       nullptr,       &pipe_client_to_server_messages_second_.receiver,
+//       nullptr};
 //   StrictMock<MockFunction<void(absl::Status)>> on_done;
 //   EXPECT_CALL(on_done, Call(absl::OkStatus()));
-//   EXPECT_CALL(control_endpoint_, Write).Times(2).WillRepeatedly(Return(true));
-//   EXPECT_CALL(data_endpoint_, Write).Times(2).WillRepeatedly(Return(true));
-//   auto activity = MakeActivity(
+//   EXPECT_CALL(control_endpoint_,
+//   Write).Times(2).WillRepeatedly(Return(true)); EXPECT_CALL(data_endpoint_,
+//   Write).Times(2).WillRepeatedly(Return(true)); auto activity = MakeActivity(
 //       Seq(
 //           // Concurrently: send messages into the pipe, and receive from the
 //           // pipe.
@@ -382,15 +430,16 @@ EXPECT_CALL(data_endpoint_, Read)
 //   ClientMetadataHandle md;
 //   auto first_stream_args = CallArgs{
 //       std::move(md), ClientInitialMetadataOutstandingToken::Empty(), nullptr,
-//       nullptr,       &pipe_client_to_server_messages_.receiver,      nullptr};
+//       nullptr,       &pipe_client_to_server_messages_.receiver, nullptr};
 //   auto second_stream_args = CallArgs{
-//       std::move(md), ClientInitialMetadataOutstandingToken::Empty(),   nullptr,
-//       nullptr,       &pipe_client_to_server_messages_second_.receiver, nullptr};
+//       std::move(md), ClientInitialMetadataOutstandingToken::Empty(), nullptr,
+//       nullptr,       &pipe_client_to_server_messages_second_.receiver,
+//       nullptr};
 //   StrictMock<MockFunction<void(absl::Status)>> on_done;
 //   EXPECT_CALL(on_done, Call(absl::OkStatus()));
-//   EXPECT_CALL(control_endpoint_, Write).Times(6).WillRepeatedly(Return(true));
-//   EXPECT_CALL(data_endpoint_, Write).Times(6).WillRepeatedly(Return(true));
-//   auto activity = MakeActivity(
+//   EXPECT_CALL(control_endpoint_,
+//   Write).Times(6).WillRepeatedly(Return(true)); EXPECT_CALL(data_endpoint_,
+//   Write).Times(6).WillRepeatedly(Return(true)); auto activity = MakeActivity(
 //       Seq(
 //           // Concurrently: send messages into the pipe, and receive from the
 //           // pipe.
