@@ -220,8 +220,8 @@ grpc_cc_test(
     uses_event_engine = False,
     uses_polling = False,
     deps = [
-        "//src/core:loop",
         "//src/core:join",
+        "//src/core:loop",
         "//src/core:poll",
         "//src/core:seq",
     ],
