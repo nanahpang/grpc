@@ -20,6 +20,7 @@
 
 #include <algorithm>  // IWYU pragma: keep
 #include <memory>
+#include <string>
 #include <tuple>
 #include <vector>  // IWYU pragma: keep
 
@@ -30,6 +31,7 @@
 
 #include <grpc/event_engine/event_engine.h>
 #include <grpc/event_engine/memory_allocator.h>
+#include <grpc/event_engine/slice.h>
 #include <grpc/event_engine/slice_buffer.h>
 #include <grpc/grpc.h>
 
@@ -44,6 +46,7 @@
 #include "src/core/lib/resource_quota/resource_quota.h"
 #include "src/core/lib/slice/slice.h"
 #include "src/core/lib/slice/slice_buffer.h"
+#include "src/core/lib/slice/slice_internal.h"
 #include "test/core/event_engine/fuzzing_event_engine/fuzzing_event_engine.h"
 #include "test/core/event_engine/fuzzing_event_engine/fuzzing_event_engine.pb.h"
 #include "test/core/promise/test_wakeup_schedulers.h"
@@ -107,32 +110,33 @@ class ClientTransportTest : public ::testing::Test {
         arena_(MakeScopedArena(initial_arena_size, &memory_allocator_)),
         pipe_client_to_server_messages_(arena_.get()),
         pipe_client_to_server_messages_second_(arena_.get()) {
-    // Construct test frame for EventEngine read: headers  (15 bytes), trailers (15 bytes), message padding (48
-    // byte), message(16 bytes).
-    const std::string frame_header = {static_cast<char>(0x80), // frame type = fragment
-                                      0x03, // flag = has header + has trailer
-                                      0x00,
-                                      0x00,
-                                      0x01, // stream id = 1
-                                      0x00,
-                                      0x00,
-                                      0x00,
-                                      0x0f, // header length = 15
-                                      0x00,
-                                      0x00,
-                                      0x00,
-                                      0x10, // message length = 16
-                                      0x00,
-                                      0x00,
-                                      0x00,
-                                      0x30, // message padding =48
-                                      0x00,
-                                      0x00,
-                                      0x00,
-                                      0x0f, // trailer length = 15
-                                      0x00,
-                                      0x00,
-                                      0x00};
+    // Construct test frame for EventEngine read: headers  (15 bytes), trailers
+    // (15 bytes), message padding (48 byte), message(16 bytes).
+    const std::string frame_header = {
+        static_cast<char>(0x80),  // frame type = fragment
+        0x03,                     // flag = has header + has trailer
+        0x00,
+        0x00,
+        0x01,  // stream id = 1
+        0x00,
+        0x00,
+        0x00,
+        0x0f,  // header length = 15
+        0x00,
+        0x00,
+        0x00,
+        0x10,  // message length = 16
+        0x00,
+        0x00,
+        0x00,
+        0x30,  // message padding =48
+        0x00,
+        0x00,
+        0x00,
+        0x0f,  // trailer length = 15
+        0x00,
+        0x00,
+        0x00};
     const std::string header = {0x10, 0x0b, 0x67, 0x72, 0x70, 0x63, 0x2d, 0x73,
                                 0x74, 0x61, 0x74, 0x75, 0x73, 0x01, 0x30};
     const std::string message_padding = {
@@ -170,9 +174,7 @@ class ClientTransportTest : public ::testing::Test {
               buffer->Append(std::move(slice));
               return true;
             }));
-    EXPECT_CALL(control_endpoint_, Read)
-        .InSequence(s)
-        .WillOnce(Return(false));
+    EXPECT_CALL(control_endpoint_, Read).InSequence(s).WillOnce(Return(false));
     Sequence data_sequence;
     EXPECT_CALL(data_endpoint_, Read)
         .InSequence(data_sequence)
