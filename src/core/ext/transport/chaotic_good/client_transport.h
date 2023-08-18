@@ -21,9 +21,7 @@
 #include <stdio.h>
 
 #include <initializer_list>  // IWYU pragma: keep
-#include <iostream>
 #include <memory>
-#include <string>
 #include <type_traits>
 #include <utility>
 
@@ -42,6 +40,7 @@
 #include "src/core/lib/promise/activity.h"
 #include "src/core/lib/promise/for_each.h"
 #include "src/core/lib/promise/if.h"
+#include "src/core/lib/promise/join.h"
 #include "src/core/lib/promise/loop.h"
 #include "src/core/lib/promise/mpsc.h"
 #include "src/core/lib/promise/pipe.h"
@@ -49,7 +48,6 @@
 #include "src/core/lib/resource_quota/arena.h"
 #include "src/core/lib/resource_quota/memory_quota.h"
 #include "src/core/lib/slice/slice_buffer.h"
-#include "src/core/lib/transport/metadata_batch.h"
 #include "src/core/lib/transport/promise_endpoint.h"
 #include "src/core/lib/transport/transport.h"
 
@@ -78,7 +76,7 @@ class ClientTransport {
       MutexLock lock(&mu_);
       stream_id = next_stream_id_++;
     }
-    return Seq(
+    return Join(
         // Continuously send data frame with client to server messages.
         ForEach(std::move(*call_args.client_to_server_messages),
                 [stream_id, initial_frame = true,
@@ -113,31 +111,30 @@ class ClientTransport {
               [server_initial_metadata = call_args.server_initial_metadata,
                server_to_client_message = call_args.server_to_client_messages](
                   ServerFrame server_frame) mutable {
-                ServerFragmentFrame frame =
-                    std::move(absl::get<ServerFragmentFrame>(server_frame));
-                return Seq(If((frame.headers != nullptr),
-                              [server_initial_metadata,
-                               headers = std::move(frame.headers)]() mutable {
-                                return server_initial_metadata->Push(
-                                    std::move(headers));
-                              },
-                              [] { return false; }),
-                           If((frame.message != nullptr),
-                              [server_to_client_message,
-                               message = std::move(frame.message)]() mutable {
-                                return server_to_client_message->Push(
-                                    std::move(message));
-                              },
-                              [] { return false; }),
-                           If((frame.trailers != nullptr),
-                              [trailers = std::move(frame.trailers)]() mutable
-                              -> LoopCtl<absl::Status> {
-                                // TODO(ladynana): return ServerMetadataHandler
-                                return absl::OkStatus();
-                              },
-                              []() -> LoopCtl<absl::Status> {
-                                return absl::OkStatus();
-                              }));
+                auto frame = std::make_shared<ServerFragmentFrame>(
+                    std::move(absl::get<ServerFragmentFrame>(server_frame)));
+                return Seq(
+                    If((frame->headers != nullptr),
+                       [server_initial_metadata,
+                        headers = std::move(frame->headers)]() mutable {
+                         return server_initial_metadata->Push(
+                             std::move(headers));
+                       },
+                       [] { return false; }),
+                    If((frame->message != nullptr),
+                       [server_to_client_message,
+                        message = std::move(frame->message)]() mutable {
+                         return server_to_client_message->Push(
+                             std::move(message));
+                       },
+                       [] { return false; }),
+                    If((frame->trailers != nullptr),
+                       [trailers = std::move(frame->trailers)]() mutable
+                       -> LoopCtl<absl::Status> {
+                         // TODO(ladynana): return ServerMetadataHandler
+                         return absl::OkStatus();
+                       },
+                       []() -> LoopCtl<absl::Status> { return Continue(); }));
               });
         })
 
@@ -151,6 +148,7 @@ class ClientTransport {
   // Max buffer is set to 4, so that for stream reads each time it will queue
   // at most 2 frames.
   MpscReceiver<ServerFrame> incoming_frames_;
+  MpscSender<ServerFrame> incoming_frames_sender_;
   Mutex mu_;
   uint32_t next_stream_id_ ABSL_GUARDED_BY(mu_) = 1;
   ActivityPtr writer_;

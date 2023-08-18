@@ -106,33 +106,38 @@ class ClientTransportTest : public ::testing::Test {
             fuzzing_event_engine::Actions())),
         arena_(MakeScopedArena(initial_arena_size, &memory_allocator_)),
         pipe_client_to_server_messages_(arena_.get()),
-        pipe_client_to_server_messages_second_(arena_.get()) {
-    // Construct test frame for EventEngine read: headers  (15 bytes), trailers (15 bytes), message padding (48
-    // byte), message(16 bytes).
-    const std::string frame_header = {static_cast<char>(0x80), // frame type = fragment
-                                      0x03, // flag = has header + has trailer
-                                      0x00,
-                                      0x00,
-                                      0x01, // stream id = 1
-                                      0x00,
-                                      0x00,
-                                      0x00,
-                                      0x0f, // header length = 15
-                                      0x00,
-                                      0x00,
-                                      0x00,
-                                      0x10, // message length = 16
-                                      0x00,
-                                      0x00,
-                                      0x00,
-                                      0x30, // message padding =48
-                                      0x00,
-                                      0x00,
-                                      0x00,
-                                      0x0f, // trailer length = 15
-                                      0x00,
-                                      0x00,
-                                      0x00};
+        pipe_client_to_server_messages_second_(arena_.get()),
+        pipe_server_to_client_messages_(arena_.get()),
+        pipe_server_to_client_messages_second_(arena_.get()),
+        pipe_server_intial_metadata_(arena_.get()),
+        pipe_server_intial_metadata_second_(arena_.get()) {
+    // Construct test frame for EventEngine read: headers  (15 bytes),
+    // message(16 bytes), message padding (48 byte), trailers (15 bytes).
+    const std::string frame_header = {
+        static_cast<char>(0x80),  // frame type = fragment
+        0x03,                     // flag = has header + has trailer
+        0x00,
+        0x00,
+        0x01,  // stream id = 1
+        0x00,
+        0x00,
+        0x00,
+        0x0f,  // header length = 15
+        0x00,
+        0x00,
+        0x00,
+        0x10,  // message length = 16
+        0x00,
+        0x00,
+        0x00,
+        0x30,  // message padding =48
+        0x00,
+        0x00,
+        0x00,
+        0x0f,  // trailer length = 15
+        0x00,
+        0x00,
+        0x00};
     const std::string header = {0x10, 0x0b, 0x67, 0x72, 0x70, 0x63, 0x2d, 0x73,
                                 0x74, 0x61, 0x74, 0x75, 0x73, 0x01, 0x30};
     const std::string message_padding = {
@@ -170,9 +175,7 @@ class ClientTransportTest : public ::testing::Test {
               buffer->Append(std::move(slice));
               return true;
             }));
-    EXPECT_CALL(control_endpoint_, Read)
-        .InSequence(s)
-        .WillOnce(Return(false));
+    EXPECT_CALL(control_endpoint_, Read).InSequence(s).WillOnce(Return(false));
     Sequence data_sequence;
     EXPECT_CALL(data_endpoint_, Read)
         .InSequence(data_sequence)
@@ -233,6 +236,12 @@ class ClientTransportTest : public ::testing::Test {
   Pipe<MessageHandle> pipe_client_to_server_messages_;
   // Added for mutliple streams tests.
   Pipe<MessageHandle> pipe_client_to_server_messages_second_;
+  Pipe<MessageHandle> pipe_server_to_client_messages_;
+  // Added for mutliple streams tests.
+  Pipe<MessageHandle> pipe_server_to_client_messages_second_;
+  Pipe<ServerMetadataHandle> pipe_server_intial_metadata_;
+  // Added for mutliple streams tests.
+  Pipe<ServerMetadataHandle> pipe_server_intial_metadata_second_;
 
   const absl::Status kDummyErrorStatus =
       absl::ErrnoToStatus(5566, "just an error");
@@ -242,9 +251,12 @@ class ClientTransportTest : public ::testing::Test {
 TEST_F(ClientTransportTest, AddOneStream) {
   auto messages = CreateMessages(1);
   ClientMetadataHandle md;
-  auto args = CallArgs{
-      std::move(md), ClientInitialMetadataOutstandingToken::Empty(), nullptr,
-      nullptr,       &pipe_client_to_server_messages_.receiver,      nullptr};
+  auto args = CallArgs{std::move(md),
+                       ClientInitialMetadataOutstandingToken::Empty(),
+                       nullptr,
+                       &pipe_server_intial_metadata_.sender,
+                       &pipe_client_to_server_messages_.receiver,
+                       &pipe_server_to_client_messages_.sender};
   StrictMock<MockFunction<void(absl::Status)>> on_done;
   EXPECT_CALL(on_done, Call(absl::OkStatus()));
   EXPECT_CALL(control_endpoint_, Write).WillOnce(Return(true));
@@ -259,11 +271,25 @@ TEST_F(ClientTransportTest, AddOneStream) {
                      this->pipe_client_to_server_messages_.sender.Close();
                      return absl::OkStatus();
                    }),
-               client_transport_->AddStream(std::move(args))),
+               Seq(client_transport_->AddStream(std::move(args)),
+                   [this]() {
+                     this->pipe_server_to_client_messages_.sender.Close();
+                     this->pipe_server_intial_metadata_.sender.Close();
+                     return absl::OkStatus();
+                   }),
+               Seq(
+                   pipe_server_intial_metadata_.receiver.Next(),
+                   [this](NextResult<ServerMetadataHandle> ret) {
+                     return pipe_server_to_client_messages_.receiver.Next();
+                   },
+                   [](NextResult<MessageHandle> ret) {
+                     return absl::OkStatus();
+                   })),
           // Once complete, verify successful sending and the received value.
-          [](const std::tuple<absl::Status, absl::Status>& ret) {
+          [](const std::tuple<absl::Status, absl::Status, absl::Status>& ret) {
             EXPECT_TRUE(std::get<0>(ret).ok());
             EXPECT_TRUE(std::get<1>(ret).ok());
+            EXPECT_TRUE(std::get<2>(ret).ok());
             return absl::OkStatus();
           }),
       InlineWakeupScheduler(),
@@ -276,9 +302,12 @@ TEST_F(ClientTransportTest, AddOneStream) {
 TEST_F(ClientTransportTest, AddOneStreamWithEEFailed) {
   auto messages = CreateMessages(1);
   ClientMetadataHandle md;
-  auto args = CallArgs{
-      std::move(md), ClientInitialMetadataOutstandingToken::Empty(), nullptr,
-      nullptr,       &pipe_client_to_server_messages_.receiver,      nullptr};
+  auto args = CallArgs{std::move(md),
+                       ClientInitialMetadataOutstandingToken::Empty(),
+                       nullptr,
+                       &pipe_server_intial_metadata_.sender,
+                       &pipe_client_to_server_messages_.receiver,
+                       &pipe_server_to_client_messages_.sender};
   StrictMock<MockFunction<void(absl::Status)>> on_done;
   EXPECT_CALL(on_done, Call(absl::OkStatus()));
   EXPECT_CALL(control_endpoint_, Write)
@@ -303,13 +332,27 @@ TEST_F(ClientTransportTest, AddOneStreamWithEEFailed) {
                      this->pipe_client_to_server_messages_.sender.Close();
                      return absl::OkStatus();
                    }),
-               client_transport_->AddStream(std::move(args))),
+               Seq(client_transport_->AddStream(std::move(args)),
+                   [this]() {
+                     this->pipe_server_to_client_messages_.sender.Close();
+                     this->pipe_server_intial_metadata_.sender.Close();
+                     return absl::OkStatus();
+                   }),
+               Seq(
+                   pipe_server_intial_metadata_.receiver.Next(),
+                   [this](NextResult<ServerMetadataHandle> ret) {
+                     return pipe_server_to_client_messages_.receiver.Next();
+                   },
+                   [](NextResult<MessageHandle> ret) {
+                     return absl::OkStatus();
+                   })),
           // Once complete, verify successful sending and the received value.
-          [](const std::tuple<absl::Status, absl::Status>& ret) {
+          [](const std::tuple<absl::Status, absl::Status, absl::Status>& ret) {
             // TODO(ladynana): change these expectations to errors after the
             // writer activity closes transport for EE failures.
             EXPECT_TRUE(std::get<0>(ret).ok());
             EXPECT_TRUE(std::get<1>(ret).ok());
+            EXPECT_TRUE(std::get<2>(ret).ok());
             return absl::OkStatus();
           }),
       InlineWakeupScheduler(),
@@ -322,9 +365,12 @@ TEST_F(ClientTransportTest, AddOneStreamWithEEFailed) {
 TEST_F(ClientTransportTest, AddOneStreamMultipleMessages) {
   auto messages = CreateMessages(3);
   ClientMetadataHandle md;
-  auto args = CallArgs{
-      std::move(md), ClientInitialMetadataOutstandingToken::Empty(), nullptr,
-      nullptr,       &pipe_client_to_server_messages_.receiver,      nullptr};
+  auto args = CallArgs{std::move(md),
+                       ClientInitialMetadataOutstandingToken::Empty(),
+                       nullptr,
+                       &pipe_server_intial_metadata_.sender,
+                       &pipe_client_to_server_messages_.receiver,
+                       &pipe_server_to_client_messages_.sender};
   StrictMock<MockFunction<void(absl::Status)>> on_done;
   EXPECT_CALL(on_done, Call(absl::OkStatus()));
   EXPECT_CALL(control_endpoint_, Write).Times(3).WillRepeatedly(Return(true));
@@ -343,11 +389,25 @@ TEST_F(ClientTransportTest, AddOneStreamMultipleMessages) {
                      this->pipe_client_to_server_messages_.sender.Close();
                      return absl::OkStatus();
                    }),
-               client_transport_->AddStream(std::move(args))),
+               Seq(client_transport_->AddStream(std::move(args)),
+                   [this]() {
+                     this->pipe_server_to_client_messages_.sender.Close();
+                     this->pipe_server_intial_metadata_.sender.Close();
+                     return absl::OkStatus();
+                   }),
+               Seq(
+                   pipe_server_intial_metadata_.receiver.Next(),
+                   [this](NextResult<ServerMetadataHandle> ret) {
+                     return pipe_server_to_client_messages_.receiver.Next();
+                   },
+                   [](NextResult<MessageHandle> ret) {
+                     return absl::OkStatus();
+                   })),
           // Once complete, verify successful sending and the received value.
-          [](const std::tuple<absl::Status, absl::Status>& ret) {
+          [](const std::tuple<absl::Status, absl::Status, absl::Status>& ret) {
             EXPECT_TRUE(std::get<0>(ret).ok());
             EXPECT_TRUE(std::get<1>(ret).ok());
+            EXPECT_TRUE(std::get<2>(ret).ok());
             return absl::OkStatus();
           }),
       InlineWakeupScheduler(),
@@ -360,12 +420,20 @@ TEST_F(ClientTransportTest, AddOneStreamMultipleMessages) {
 TEST_F(ClientTransportTest, AddMultipleStreams) {
   auto messages = CreateMessages(2);
   ClientMetadataHandle md;
-  auto first_stream_args = CallArgs{
-      std::move(md), ClientInitialMetadataOutstandingToken::Empty(), nullptr,
-      nullptr,       &pipe_client_to_server_messages_.receiver,      nullptr};
-  auto second_stream_args = CallArgs{
-      std::move(md), ClientInitialMetadataOutstandingToken::Empty(),   nullptr,
-      nullptr,       &pipe_client_to_server_messages_second_.receiver, nullptr};
+  auto first_stream_args =
+      CallArgs{std::move(md),
+               ClientInitialMetadataOutstandingToken::Empty(),
+               nullptr,
+               &pipe_server_intial_metadata_.sender,
+               &pipe_client_to_server_messages_.receiver,
+               &pipe_server_to_client_messages_.sender};
+  auto second_stream_args =
+      CallArgs{std::move(md),
+               ClientInitialMetadataOutstandingToken::Empty(),
+               nullptr,
+               &pipe_server_intial_metadata_second_.sender,
+               &pipe_client_to_server_messages_second_.receiver,
+               &pipe_server_to_client_messages_second_.sender};
   StrictMock<MockFunction<void(absl::Status)>> on_done;
   EXPECT_CALL(on_done, Call(absl::OkStatus()));
   EXPECT_CALL(control_endpoint_, Write).Times(2).WillRepeatedly(Return(true));
@@ -390,16 +458,45 @@ TEST_F(ClientTransportTest, AddMultipleStreams) {
                     return absl::OkStatus();
                   }),
               // Receive message from first stream pipe.
-              client_transport_->AddStream(std::move(first_stream_args)),
+              Seq(client_transport_->AddStream(std::move(first_stream_args)),
+                  [this]() {
+                    this->pipe_server_to_client_messages_.sender.Close();
+                    this->pipe_server_intial_metadata_.sender.Close();
+                    return absl::OkStatus();
+                  }),
               // Receive message from second stream pipe.
-              client_transport_->AddStream(std::move(second_stream_args))),
+              Seq(client_transport_->AddStream(std::move(second_stream_args)),
+                  [this]() {
+                    this->pipe_server_to_client_messages_second_.sender.Close();
+                    this->pipe_server_intial_metadata_second_.sender.Close();
+                    return absl::OkStatus();
+                  }),
+              Seq(
+                  pipe_server_intial_metadata_.receiver.Next(),
+                  [this](NextResult<ServerMetadataHandle> ret) {
+                    return pipe_server_to_client_messages_.receiver.Next();
+                  },
+                  [](NextResult<MessageHandle> ret) {
+                    return absl::OkStatus();
+                  }),
+              Seq(
+                  pipe_server_intial_metadata_second_.receiver.Next(),
+                  [this](NextResult<ServerMetadataHandle> ret) {
+                    return pipe_server_to_client_messages_second_.receiver
+                        .Next();
+                  },
+                  [](NextResult<MessageHandle> ret) {
+                    return absl::OkStatus();
+                  })),
           // Once complete, verify successful sending and the received value.
           [](const std::tuple<absl::Status, absl::Status, absl::Status,
-                              absl::Status>& ret) {
+                              absl::Status, absl::Status, absl::Status>& ret) {
             EXPECT_TRUE(std::get<0>(ret).ok());
             EXPECT_TRUE(std::get<1>(ret).ok());
             EXPECT_TRUE(std::get<2>(ret).ok());
             EXPECT_TRUE(std::get<3>(ret).ok());
+            EXPECT_TRUE(std::get<4>(ret).ok());
+            EXPECT_TRUE(std::get<5>(ret).ok());
             return absl::OkStatus();
           }),
       InlineWakeupScheduler(),
@@ -412,12 +509,20 @@ TEST_F(ClientTransportTest, AddMultipleStreams) {
 TEST_F(ClientTransportTest, AddMultipleStreamsMultipleMessages) {
   auto messages = CreateMessages(6);
   ClientMetadataHandle md;
-  auto first_stream_args = CallArgs{
-      std::move(md), ClientInitialMetadataOutstandingToken::Empty(), nullptr,
-      nullptr,       &pipe_client_to_server_messages_.receiver,      nullptr};
-  auto second_stream_args = CallArgs{
-      std::move(md), ClientInitialMetadataOutstandingToken::Empty(),   nullptr,
-      nullptr,       &pipe_client_to_server_messages_second_.receiver, nullptr};
+  auto first_stream_args =
+      CallArgs{std::move(md),
+               ClientInitialMetadataOutstandingToken::Empty(),
+               nullptr,
+               &pipe_server_intial_metadata_.sender,
+               &pipe_client_to_server_messages_.receiver,
+               &pipe_server_to_client_messages_.sender};
+  auto second_stream_args =
+      CallArgs{std::move(md),
+               ClientInitialMetadataOutstandingToken::Empty(),
+               nullptr,
+               &pipe_server_intial_metadata_second_.sender,
+               &pipe_client_to_server_messages_second_.receiver,
+               &pipe_server_to_client_messages_second_.sender};
   StrictMock<MockFunction<void(absl::Status)>> on_done;
   EXPECT_CALL(on_done, Call(absl::OkStatus()));
   EXPECT_CALL(control_endpoint_, Write).Times(6).WillRepeatedly(Return(true));
@@ -449,17 +554,46 @@ TEST_F(ClientTransportTest, AddMultipleStreamsMultipleMessages) {
                     pipe_client_to_server_messages_second_.sender.Close();
                     return absl::OkStatus();
                   }),
-              // Receive messages from first stream pipe.
-              client_transport_->AddStream(std::move(first_stream_args)),
-              // Receive messages from second stream pipe.
-              client_transport_->AddStream(std::move(second_stream_args))),
+              // Receive message from first stream pipe.
+              Seq(client_transport_->AddStream(std::move(first_stream_args)),
+                  [this]() {
+                    this->pipe_server_to_client_messages_.sender.Close();
+                    this->pipe_server_intial_metadata_.sender.Close();
+                    return absl::OkStatus();
+                  }),
+              // Receive message from second stream pipe.
+              Seq(client_transport_->AddStream(std::move(second_stream_args)),
+                  [this]() {
+                    this->pipe_server_to_client_messages_second_.sender.Close();
+                    this->pipe_server_intial_metadata_second_.sender.Close();
+                    return absl::OkStatus();
+                  }),
+              Seq(
+                  pipe_server_intial_metadata_.receiver.Next(),
+                  [this](NextResult<ServerMetadataHandle> ret) {
+                    return pipe_server_to_client_messages_.receiver.Next();
+                  },
+                  [](NextResult<MessageHandle> ret) {
+                    return absl::OkStatus();
+                  }),
+              Seq(
+                  pipe_server_intial_metadata_second_.receiver.Next(),
+                  [this](NextResult<ServerMetadataHandle> ret) {
+                    return pipe_server_to_client_messages_second_.receiver
+                        .Next();
+                  },
+                  [](NextResult<MessageHandle> ret) {
+                    return absl::OkStatus();
+                  })),
           // Once complete, verify successful sending and the received value.
           [](const std::tuple<absl::Status, absl::Status, absl::Status,
-                              absl::Status>& ret) {
+                              absl::Status, absl::Status, absl::Status>& ret) {
             EXPECT_TRUE(std::get<0>(ret).ok());
             EXPECT_TRUE(std::get<1>(ret).ok());
             EXPECT_TRUE(std::get<2>(ret).ok());
             EXPECT_TRUE(std::get<3>(ret).ok());
+            EXPECT_TRUE(std::get<4>(ret).ok());
+            EXPECT_TRUE(std::get<5>(ret).ok());
             return absl::OkStatus();
           }),
       InlineWakeupScheduler(),

@@ -53,6 +53,7 @@ ClientTransport::ClientTransport(
     std::shared_ptr<grpc_event_engine::experimental::EventEngine> event_engine)
     : outgoing_frames_(MpscReceiver<ClientFrame>(4)),
       incoming_frames_(MpscReceiver<ServerFrame>(4)),
+      incoming_frames_sender_(incoming_frames_.MakeSender()),
       control_endpoint_(std::move(control_endpoint)),
       data_endpoint_(std::move(data_endpoint)),
       control_endpoint_write_buffer_(SliceBuffer()),
@@ -140,12 +141,14 @@ ClientTransport::ClientTransport(
                   .value();
           // Read header and trailers from control endpoint.
           // Read message padding and message from data endpoint.
-          return Join(control_endpoint_->Read(frame_header_.GetFrameLength()),
-                      Seq(data_endpoint_->Read(frame_header_.message_padding),
-                          [this](absl::StatusOr<SliceBuffer> read_buffer){
-                            // TODO(ladynana): handle read failure here.
-                            GPR_ASSERT(read_buffer.ok());
-                            return data_endpoint_->Read(frame_header_.message_length);}));
+          return Join(
+              control_endpoint_->Read(frame_header_.GetFrameLength()),
+              Seq(data_endpoint_->Read(frame_header_.message_padding),
+                  [this](absl::StatusOr<SliceBuffer> read_buffer) {
+                    // TODO(ladynana): handle read failure here.
+                    GPR_ASSERT(read_buffer.ok());
+                    return data_endpoint_->Read(frame_header_.message_length);
+                  }));
         },
         // Finish reads and send receive frame to incoming_frames.
         [this](
@@ -161,20 +164,16 @@ ClientTransport::ClientTransport(
           ExecCtx exec_ctx;
           // Deserialize frame from read buffer.
           auto status = frame->Deserialize(hpack_parser_.get(), frame_header_,
-                                          control_endpoint_read_buffer_);
+                                           control_endpoint_read_buffer_);
           GPR_ASSERT(status.ok());
           // Move message into frame.
           frame->message = arena_->MakePooled<Message>(
               std::move(data_endpoint_read_buffer_), 0);
-          auto incoming_frames = std::make_shared<MpscSender<ServerFrame>>(incoming_frames_.MakeSender());
-          std::cout << "\n send frame to mpsc.";
-          fflush(stdout);
-          return incoming_frames->Send(ServerFrame(std::move(*frame)));
+          incoming_frames_sender_ = incoming_frames_.MakeSender();
+          return incoming_frames_sender_.Send(ServerFrame(std::move(*frame)));
         },
         // Check if read_loop_ should continue.
         [](bool ret) -> LoopCtl<absl::Status> {
-          std::cout << "\n Loop finish ";
-          fflush(stdout);
           if (ret) {
             // Send incoming frames successfully.
             return Continue();
