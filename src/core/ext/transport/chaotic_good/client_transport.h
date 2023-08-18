@@ -21,9 +21,7 @@
 #include <stdio.h>
 
 #include <initializer_list>  // IWYU pragma: keep
-#include <iostream>
 #include <memory>
-#include <string>
 #include <type_traits>
 #include <utility>
 
@@ -49,7 +47,6 @@
 #include "src/core/lib/resource_quota/arena.h"
 #include "src/core/lib/resource_quota/memory_quota.h"
 #include "src/core/lib/slice/slice_buffer.h"
-#include "src/core/lib/transport/metadata_batch.h"
 #include "src/core/lib/transport/promise_endpoint.h"
 #include "src/core/lib/transport/transport.h"
 
