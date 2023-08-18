@@ -50,6 +50,7 @@
 
 using testing::MockFunction;
 using testing::Return;
+using testing::Sequence;
 using testing::StrictMock;
 using testing::WithArgs;
 
@@ -103,18 +104,106 @@ class ClientTransportTest : public ::testing::Test {
               return options;
             }(),
             fuzzing_event_engine::Actions())),
-        client_transport_(
-            std::make_unique<PromiseEndpoint>(
-                std::unique_ptr<MockEndpoint>(control_endpoint_ptr_),
-                SliceBuffer()),
-            std::make_unique<PromiseEndpoint>(
-                std::unique_ptr<MockEndpoint>(data_endpoint_ptr_),
-                SliceBuffer()),
-            std::static_pointer_cast<
-                grpc_event_engine::experimental::EventEngine>(event_engine_)),
         arena_(MakeScopedArena(initial_arena_size, &memory_allocator_)),
         pipe_client_to_server_messages_(arena_.get()),
-        pipe_client_to_server_messages_second_(arena_.get()) {}
+        pipe_client_to_server_messages_second_(arena_.get()) {
+    // Construct test frame for EventEngine read: headers  (15 bytes), trailers (15 bytes), message padding (48
+    // byte), message(16 bytes).
+    const std::string frame_header = {static_cast<char>(0x80), // frame type = fragment
+                                      0x03, // flag = has header + has trailer
+                                      0x00,
+                                      0x00,
+                                      0x01, // stream id = 1
+                                      0x00,
+                                      0x00,
+                                      0x00,
+                                      0x0f, // header length = 15
+                                      0x00,
+                                      0x00,
+                                      0x00,
+                                      0x10, // message length = 16
+                                      0x00,
+                                      0x00,
+                                      0x00,
+                                      0x30, // message padding =48
+                                      0x00,
+                                      0x00,
+                                      0x00,
+                                      0x0f, // trailer length = 15
+                                      0x00,
+                                      0x00,
+                                      0x00};
+    const std::string header = {0x10, 0x0b, 0x67, 0x72, 0x70, 0x63, 0x2d, 0x73,
+                                0x74, 0x61, 0x74, 0x75, 0x73, 0x01, 0x30};
+    const std::string message_padding = {
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    };
+    const std::string messages = {0x10, 0x0b, 0x67, 0x72, 0x70, 0x63,
+                                  0x2d, 0x73, 0x74, 0x61, 0x74, 0x75,
+                                  0x73, 0x01, 0x30, 0x01};
+    const std::string trailers = {0x10, 0x0b, 0x67, 0x72, 0x70,
+                                  0x63, 0x2d, 0x73, 0x74, 0x61,
+                                  0x74, 0x75, 0x73, 0x01, 0x30};
+    Sequence s;
+    EXPECT_CALL(control_endpoint_, Read)
+        .InSequence(s)
+        .WillOnce(WithArgs<1>(
+            [&frame_header](
+                grpc_event_engine::experimental::SliceBuffer* buffer) {
+              // Schedule mock_endpoint to read buffer.
+              grpc_event_engine::experimental::Slice slice(
+                  grpc_slice_from_cpp_string(frame_header));
+              buffer->Append(std::move(slice));
+              return true;
+            }));
+    EXPECT_CALL(control_endpoint_, Read)
+        .InSequence(s)
+        .WillOnce(WithArgs<1>(
+            [&header,
+             &trailers](grpc_event_engine::experimental::SliceBuffer* buffer) {
+              // Schedule mock_endpoint to read buffer.
+              grpc_event_engine::experimental::Slice slice(
+                  grpc_slice_from_cpp_string(header + trailers));
+              buffer->Append(std::move(slice));
+              return true;
+            }));
+    EXPECT_CALL(control_endpoint_, Read)
+        .InSequence(s)
+        .WillOnce(Return(false));
+    Sequence data_sequence;
+    EXPECT_CALL(data_endpoint_, Read)
+        .InSequence(data_sequence)
+        .WillOnce(WithArgs<1>(
+            [&message_padding](
+                grpc_event_engine::experimental::SliceBuffer* buffer) {
+              // Schedule mock_endpoint to read buffer.
+              grpc_event_engine::experimental::Slice slice(
+                  grpc_slice_from_cpp_string(message_padding));
+              buffer->Append(std::move(slice));
+              return true;
+            }));
+    EXPECT_CALL(data_endpoint_, Read)
+        .InSequence(data_sequence)
+        .WillOnce(WithArgs<1>(
+            [&messages](grpc_event_engine::experimental::SliceBuffer* buffer) {
+              // Schedule mock_endpoint to read buffer.
+              grpc_event_engine::experimental::Slice slice(
+                  grpc_slice_from_cpp_string(messages));
+              buffer->Append(std::move(slice));
+              return true;
+            }));
+    client_transport_ = std::make_unique<ClientTransport>(
+        std::make_unique<PromiseEndpoint>(
+            std::unique_ptr<MockEndpoint>(control_endpoint_ptr_),
+            SliceBuffer()),
+        std::make_unique<PromiseEndpoint>(
+            std::unique_ptr<MockEndpoint>(data_endpoint_ptr_), SliceBuffer()),
+        std::static_pointer_cast<grpc_event_engine::experimental::EventEngine>(
+            event_engine_));
+  }
 
   std::vector<MessageHandle> CreateMessages(int num_of_messages) {
     std::vector<MessageHandle> messages;
@@ -139,7 +228,7 @@ class ClientTransportTest : public ::testing::Test {
   MockEndpoint& data_endpoint_;
   std::shared_ptr<grpc_event_engine::experimental::FuzzingEventEngine>
       event_engine_;
-  ClientTransport client_transport_;
+  std::unique_ptr<ClientTransport> client_transport_;
   ScopedArenaPtr arena_;
   Pipe<MessageHandle> pipe_client_to_server_messages_;
   // Added for mutliple streams tests.
@@ -170,7 +259,7 @@ TEST_F(ClientTransportTest, AddOneStream) {
                      this->pipe_client_to_server_messages_.sender.Close();
                      return absl::OkStatus();
                    }),
-               client_transport_.AddStream(std::move(args))),
+               client_transport_->AddStream(std::move(args))),
           // Once complete, verify successful sending and the received value.
           [](const std::tuple<absl::Status, absl::Status>& ret) {
             EXPECT_TRUE(std::get<0>(ret).ok());
@@ -214,7 +303,7 @@ TEST_F(ClientTransportTest, AddOneStreamWithEEFailed) {
                      this->pipe_client_to_server_messages_.sender.Close();
                      return absl::OkStatus();
                    }),
-               client_transport_.AddStream(std::move(args))),
+               client_transport_->AddStream(std::move(args))),
           // Once complete, verify successful sending and the received value.
           [](const std::tuple<absl::Status, absl::Status>& ret) {
             // TODO(ladynana): change these expectations to errors after the
@@ -254,7 +343,7 @@ TEST_F(ClientTransportTest, AddOneStreamMultipleMessages) {
                      this->pipe_client_to_server_messages_.sender.Close();
                      return absl::OkStatus();
                    }),
-               client_transport_.AddStream(std::move(args))),
+               client_transport_->AddStream(std::move(args))),
           // Once complete, verify successful sending and the received value.
           [](const std::tuple<absl::Status, absl::Status>& ret) {
             EXPECT_TRUE(std::get<0>(ret).ok());
@@ -301,9 +390,9 @@ TEST_F(ClientTransportTest, AddMultipleStreams) {
                     return absl::OkStatus();
                   }),
               // Receive message from first stream pipe.
-              client_transport_.AddStream(std::move(first_stream_args)),
+              client_transport_->AddStream(std::move(first_stream_args)),
               // Receive message from second stream pipe.
-              client_transport_.AddStream(std::move(second_stream_args))),
+              client_transport_->AddStream(std::move(second_stream_args))),
           // Once complete, verify successful sending and the received value.
           [](const std::tuple<absl::Status, absl::Status, absl::Status,
                               absl::Status>& ret) {
@@ -361,9 +450,9 @@ TEST_F(ClientTransportTest, AddMultipleStreamsMultipleMessages) {
                     return absl::OkStatus();
                   }),
               // Receive messages from first stream pipe.
-              client_transport_.AddStream(std::move(first_stream_args)),
+              client_transport_->AddStream(std::move(first_stream_args)),
               // Receive messages from second stream pipe.
-              client_transport_.AddStream(std::move(second_stream_args))),
+              client_transport_->AddStream(std::move(second_stream_args))),
           // Once complete, verify successful sending and the received value.
           [](const std::tuple<absl::Status, absl::Status, absl::Status,
                               absl::Status>& ret) {
