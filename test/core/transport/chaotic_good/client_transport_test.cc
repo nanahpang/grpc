@@ -20,6 +20,7 @@
 
 #include <algorithm>  // IWYU pragma: keep
 #include <memory>
+#include <string>
 #include <tuple>
 #include <vector>  // IWYU pragma: keep
 
@@ -30,6 +31,7 @@
 
 #include <grpc/event_engine/event_engine.h>
 #include <grpc/event_engine/memory_allocator.h>
+#include <grpc/event_engine/slice.h>
 #include <grpc/event_engine/slice_buffer.h>
 #include <grpc/grpc.h>
 
@@ -44,6 +46,7 @@
 #include "src/core/lib/resource_quota/resource_quota.h"
 #include "src/core/lib/slice/slice.h"
 #include "src/core/lib/slice/slice_buffer.h"
+#include "src/core/lib/slice/slice_internal.h"
 #include "test/core/event_engine/fuzzing_event_engine/fuzzing_event_engine.h"
 #include "test/core/event_engine/fuzzing_event_engine/fuzzing_event_engine.pb.h"
 #include "test/core/promise/test_wakeup_schedulers.h"
