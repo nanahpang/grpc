@@ -111,77 +111,78 @@ class ClientTransportTest : public ::testing::Test {
         pipe_server_to_client_messages_second_(arena_.get()),
         pipe_server_intial_metadata_(arena_.get()),
         pipe_server_intial_metadata_second_(arena_.get()) {
-    // Construct test frame for EventEngine read: headers  (15 bytes),
-    // message(16 bytes), message padding (48 byte), trailers (15 bytes).
-    const std::string frame_header = {
-        static_cast<char>(0x80),  // frame type = fragment
-        0x03,                     // flag = has header + has trailer
-        0x00,
-        0x00,
-        0x01,  // stream id = 1
-        0x00,
-        0x00,
-        0x00,
-        0x0f,  // header length = 15
-        0x00,
-        0x00,
-        0x00,
-        0x10,  // message length = 16
-        0x00,
-        0x00,
-        0x00,
-        0x30,  // message padding =48
-        0x00,
-        0x00,
-        0x00,
-        0x0f,  // trailer length = 15
-        0x00,
-        0x00,
-        0x00};
-    const std::string header = {0x10, 0x0b, 0x67, 0x72, 0x70, 0x63, 0x2d, 0x73,
-                                0x74, 0x61, 0x74, 0x75, 0x73, 0x01, 0x30};
-    const std::string message_padding = {
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    };
-    const std::string messages = {0x10, 0x0b, 0x67, 0x72, 0x70, 0x63,
-                                  0x2d, 0x73, 0x74, 0x61, 0x74, 0x75,
-                                  0x73, 0x01, 0x30, 0x01};
-    const std::string trailers = {0x10, 0x0b, 0x67, 0x72, 0x70,
-                                  0x63, 0x2d, 0x73, 0x74, 0x61,
-                                  0x74, 0x75, 0x73, 0x01, 0x30};
     Sequence s;
     EXPECT_CALL(control_endpoint_, Read)
         .InSequence(s)
-        .WillOnce(WithArgs<1>(
-            [&frame_header](
-                grpc_event_engine::experimental::SliceBuffer* buffer) {
+        .WillOnce(WithArgs<0, 1>(
+            [this](absl::AnyInvocable<void(absl::Status)> on_read,
+                   grpc_event_engine::experimental::SliceBuffer* buffer) {
+              // Construct test frame for EventEngine read: headers  (15 bytes),
+              // message(16 bytes), message padding (48 byte), trailers (15
+              // bytes).
+              const std::string frame_header = {
+                  static_cast<char>(0x80),  // frame type = fragment
+                  0x03,                     // flag = has header + has trailer
+                  0x00,
+                  0x00,
+                  0x01,  // stream id = 1
+                  0x00,
+                  0x00,
+                  0x00,
+                  0x0f,  // header length = 15
+                  0x00,
+                  0x00,
+                  0x00,
+                  0x10,  // message length = 16
+                  0x00,
+                  0x00,
+                  0x00,
+                  0x30,  // message padding =48
+                  0x00,
+                  0x00,
+                  0x00,
+                  0x0f,  // trailer length = 15
+                  0x00,
+                  0x00,
+                  0x00};
               // Schedule mock_endpoint to read buffer.
+              read_callback = std::move(on_read);
               grpc_event_engine::experimental::Slice slice(
                   grpc_slice_from_cpp_string(frame_header));
               buffer->Append(std::move(slice));
-              return true;
+              // Return false to mock EventEngine read not finish..
+              return false;
             }));
     EXPECT_CALL(control_endpoint_, Read)
         .InSequence(s)
         .WillOnce(WithArgs<1>(
-            [&header,
-             &trailers](grpc_event_engine::experimental::SliceBuffer* buffer) {
+            [](grpc_event_engine::experimental::SliceBuffer* buffer) {
+              const std::string header = {0x10, 0x0b, 0x67, 0x72, 0x70,
+                                          0x63, 0x2d, 0x73, 0x74, 0x61,
+                                          0x74, 0x75, 0x73, 0x01, 0x30};
+              const std::string trailers = {0x10, 0x0b, 0x67, 0x72, 0x70,
+                                            0x63, 0x2d, 0x73, 0x74, 0x61,
+                                            0x74, 0x75, 0x73, 0x01, 0x30};
               // Schedule mock_endpoint to read buffer.
               grpc_event_engine::experimental::Slice slice(
                   grpc_slice_from_cpp_string(header + trailers));
               buffer->Append(std::move(slice));
               return true;
             }));
-    EXPECT_CALL(control_endpoint_, Read).InSequence(s).WillOnce(Return(false));
+    // EXPECT_CALL(control_endpoint_,
+    // Read).InSequence(s).WillOnce(Return(false));
     Sequence data_sequence;
     EXPECT_CALL(data_endpoint_, Read)
         .InSequence(data_sequence)
         .WillOnce(WithArgs<1>(
-            [&message_padding](
-                grpc_event_engine::experimental::SliceBuffer* buffer) {
+            [](grpc_event_engine::experimental::SliceBuffer* buffer) {
+              const std::string message_padding = {
+                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+              };
               // Schedule mock_endpoint to read buffer.
               grpc_event_engine::experimental::Slice slice(
                   grpc_slice_from_cpp_string(message_padding));
@@ -191,7 +192,10 @@ class ClientTransportTest : public ::testing::Test {
     EXPECT_CALL(data_endpoint_, Read)
         .InSequence(data_sequence)
         .WillOnce(WithArgs<1>(
-            [&messages](grpc_event_engine::experimental::SliceBuffer* buffer) {
+            [](grpc_event_engine::experimental::SliceBuffer* buffer) {
+              const std::string messages = {0x10, 0x0b, 0x67, 0x72, 0x70, 0x63,
+                                            0x2d, 0x73, 0x74, 0x61, 0x74, 0x75,
+                                            0x73, 0x01, 0x30, 0x01};
               // Schedule mock_endpoint to read buffer.
               grpc_event_engine::experimental::Slice slice(
                   grpc_slice_from_cpp_string(messages));
@@ -243,6 +247,7 @@ class ClientTransportTest : public ::testing::Test {
   // Added for mutliple streams tests.
   Pipe<ServerMetadataHandle> pipe_server_intial_metadata_second_;
 
+  absl::AnyInvocable<void(absl::Status)> read_callback;
   const absl::Status kDummyErrorStatus =
       absl::ErrnoToStatus(5566, "just an error");
   static constexpr size_t kDummyRequestSize = 5566u;
@@ -271,7 +276,12 @@ TEST_F(ClientTransportTest, AddOneStream) {
                      this->pipe_client_to_server_messages_.sender.Close();
                      return absl::OkStatus();
                    }),
-               Seq(client_transport_->AddStream(std::move(args)),
+               Seq(Join(client_transport_->AddStream(std::move(args)),
+                        [this]() {
+                          // Start read.
+                          read_callback(absl::OkStatus());
+                          return absl::OkStatus();
+                        }),
                    [this]() {
                      this->pipe_server_to_client_messages_.sender.Close();
                      this->pipe_server_intial_metadata_.sender.Close();
@@ -332,7 +342,12 @@ TEST_F(ClientTransportTest, AddOneStreamWithEEFailed) {
                      this->pipe_client_to_server_messages_.sender.Close();
                      return absl::OkStatus();
                    }),
-               Seq(client_transport_->AddStream(std::move(args)),
+               Seq(Join(client_transport_->AddStream(std::move(args)),
+                        [this]() {
+                          // Start read.
+                          read_callback(absl::OkStatus());
+                          return absl::OkStatus();
+                        }),
                    [this]() {
                      this->pipe_server_to_client_messages_.sender.Close();
                      this->pipe_server_intial_metadata_.sender.Close();
@@ -389,7 +404,12 @@ TEST_F(ClientTransportTest, AddOneStreamMultipleMessages) {
                      this->pipe_client_to_server_messages_.sender.Close();
                      return absl::OkStatus();
                    }),
-               Seq(client_transport_->AddStream(std::move(args)),
+               Seq(Join(client_transport_->AddStream(std::move(args)),
+                        [this]() {
+                          // Start read.
+                          read_callback(absl::OkStatus());
+                          return absl::OkStatus();
+                        }),
                    [this]() {
                      this->pipe_server_to_client_messages_.sender.Close();
                      this->pipe_server_intial_metadata_.sender.Close();
@@ -458,14 +478,26 @@ TEST_F(ClientTransportTest, AddMultipleStreams) {
                     return absl::OkStatus();
                   }),
               // Receive message from first stream pipe.
-              Seq(client_transport_->AddStream(std::move(first_stream_args)),
+              Seq(Join(client_transport_->AddStream(
+                           std::move(first_stream_args)),
+                       [this]() {
+                         // Start read.
+                         read_callback(absl::OkStatus());
+                         return absl::OkStatus();
+                       }),
                   [this]() {
                     this->pipe_server_to_client_messages_.sender.Close();
                     this->pipe_server_intial_metadata_.sender.Close();
                     return absl::OkStatus();
                   }),
               // Receive message from second stream pipe.
-              Seq(client_transport_->AddStream(std::move(second_stream_args)),
+              Seq(Join(client_transport_->AddStream(
+                           std::move(second_stream_args)),
+                       [this]() {
+                         // Start read.
+                         read_callback(absl::OkStatus());
+                         return absl::OkStatus();
+                       }),
                   [this]() {
                     this->pipe_server_to_client_messages_second_.sender.Close();
                     this->pipe_server_intial_metadata_second_.sender.Close();
@@ -555,14 +587,26 @@ TEST_F(ClientTransportTest, AddMultipleStreamsMultipleMessages) {
                     return absl::OkStatus();
                   }),
               // Receive message from first stream pipe.
-              Seq(client_transport_->AddStream(std::move(first_stream_args)),
+              Seq(Join(client_transport_->AddStream(
+                           std::move(first_stream_args)),
+                       [this]() {
+                         // Start read.
+                         read_callback(absl::OkStatus());
+                         return absl::OkStatus();
+                       }),
                   [this]() {
                     this->pipe_server_to_client_messages_.sender.Close();
                     this->pipe_server_intial_metadata_.sender.Close();
                     return absl::OkStatus();
                   }),
               // Receive message from second stream pipe.
-              Seq(client_transport_->AddStream(std::move(second_stream_args)),
+              Seq(Join(client_transport_->AddStream(
+                           std::move(second_stream_args)),
+                       [this]() {
+                         // Start read.
+                         read_callback(absl::OkStatus());
+                         return absl::OkStatus();
+                       }),
                   [this]() {
                     this->pipe_server_to_client_messages_second_.sender.Close();
                     this->pipe_server_intial_metadata_second_.sender.Close();
