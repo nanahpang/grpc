@@ -19,8 +19,10 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <utility>
 
@@ -101,6 +103,8 @@ class PromiseEndpoint {
   // `Read()` before the previous read finishes. Doing that results in
   // undefined behavior.
   auto Read(size_t num_bytes) {
+    std::cout << "\n endpoint read start  ";
+    fflush(stdout);
     ReleasableMutexLock lock(&read_mutex_);
     // Assert previous read finishes.
     GPR_ASSERT(!read_result_.has_value());

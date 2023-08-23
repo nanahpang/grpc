@@ -36,9 +36,13 @@
 #include "src/core/lib/gprpp/ref_counted_ptr.h"
 #include "src/core/lib/iomgr/timer_manager.h"
 #include "src/core/lib/promise/activity.h"
+#include "src/core/lib/promise/event_engine_wakeup_scheduler.h"
 #include "src/core/lib/promise/join.h"
 #include "src/core/lib/promise/pipe.h"
+#include "src/core/lib/promise/poll.h"
+#include "src/core/lib/promise/promise.h"
 #include "src/core/lib/promise/seq.h"
+#include "src/core/lib/promise/wait_set.h"
 #include "src/core/lib/resource_quota/arena.h"
 #include "src/core/lib/resource_quota/memory_quota.h"
 #include "src/core/lib/resource_quota/resource_quota.h"
@@ -110,98 +114,106 @@ class ClientTransportTest : public ::testing::Test {
         pipe_server_to_client_messages_(arena_.get()),
         pipe_server_to_client_messages_second_(arena_.get()),
         pipe_server_intial_metadata_(arena_.get()),
-        pipe_server_intial_metadata_second_(arena_.get()) {
-    Sequence s;
-    EXPECT_CALL(control_endpoint_, Read)
-        .InSequence(s)
-        .WillOnce(WithArgs<0, 1>(
-            [this](absl::AnyInvocable<void(absl::Status)> on_read,
-                   grpc_event_engine::experimental::SliceBuffer* buffer) {
-              // Construct test frame for EventEngine read: headers  (15 bytes),
-              // message(16 bytes), message padding (48 byte), trailers (15
-              // bytes).
-              const std::string frame_header = {
-                  static_cast<char>(0x80),  // frame type = fragment
-                  0x03,                     // flag = has header + has trailer
-                  0x00,
-                  0x00,
-                  0x01,  // stream id = 1
-                  0x00,
-                  0x00,
-                  0x00,
-                  0x0f,  // header length = 15
-                  0x00,
-                  0x00,
-                  0x00,
-                  0x10,  // message length = 16
-                  0x00,
-                  0x00,
-                  0x00,
-                  0x30,  // message padding =48
-                  0x00,
-                  0x00,
-                  0x00,
-                  0x0f,  // trailer length = 15
-                  0x00,
-                  0x00,
-                  0x00};
-              // Schedule mock_endpoint to read buffer.
-              read_callback = std::move(on_read);
-              grpc_event_engine::experimental::Slice slice(
-                  grpc_slice_from_cpp_string(frame_header));
-              buffer->Append(std::move(slice));
-              // Return false to mock EventEngine read not finish..
-              return false;
-            }));
-    EXPECT_CALL(control_endpoint_, Read)
-        .InSequence(s)
-        .WillOnce(WithArgs<1>(
-            [](grpc_event_engine::experimental::SliceBuffer* buffer) {
-              const std::string header = {0x10, 0x0b, 0x67, 0x72, 0x70,
-                                          0x63, 0x2d, 0x73, 0x74, 0x61,
-                                          0x74, 0x75, 0x73, 0x01, 0x30};
-              const std::string trailers = {0x10, 0x0b, 0x67, 0x72, 0x70,
+        pipe_server_intial_metadata_second_(arena_.get()) {}
+
+  void InitialTransport(int num_of_streams) {
+    for (int i = 0; i < num_of_streams; i++) {
+      EXPECT_CALL(control_endpoint_, Read)
+          .InSequence(control_endpoint_sequence)
+          .WillOnce(WithArgs<0, 1>(
+              [this, i](absl::AnyInvocable<void(absl::Status)> on_read,
+                        grpc_event_engine::experimental::SliceBuffer*
+                            buffer) mutable {
+                // Construct test frame for EventEngine read: headers  (15
+                // bytes), message(16 bytes), message padding (48 byte),
+                // trailers (15 bytes).
+                const std::string frame_header = {
+                    static_cast<char>(0x80),  // frame type = fragment
+                    0x03,                     // flag = has header + has trailer
+                    0x00,
+                    0x00,
+                    static_cast<char>(i + 1),  // stream id = 1
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x0f,  // header length = 15
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x10,  // message length = 16
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x30,  // message padding =48
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x0f,  // trailer length = 15
+                    0x00,
+                    0x00,
+                    0x00};
+                // Schedule mock_endpoint to read buffer.
+                grpc_event_engine::experimental::Slice slice(
+                    grpc_slice_from_cpp_string(frame_header));
+                buffer->Append(std::move(slice));
+                // Return false to mock EventEngine read not finish.
+                //   if(i==0) {read_callback = std::move(on_read); return
+                //   false;} else {return true;}
+                read_callback.push_back(std::move(on_read));
+                return false;
+              }));
+      EXPECT_CALL(control_endpoint_, Read)
+          .InSequence(control_endpoint_sequence)
+          .WillOnce(WithArgs<1>(
+              [](grpc_event_engine::experimental::SliceBuffer* buffer) {
+                const std::string header = {0x10, 0x0b, 0x67, 0x72, 0x70,
                                             0x63, 0x2d, 0x73, 0x74, 0x61,
                                             0x74, 0x75, 0x73, 0x01, 0x30};
-              // Schedule mock_endpoint to read buffer.
-              grpc_event_engine::experimental::Slice slice(
-                  grpc_slice_from_cpp_string(header + trailers));
-              buffer->Append(std::move(slice));
-              return true;
-            }));
-    // EXPECT_CALL(control_endpoint_,
-    // Read).InSequence(s).WillOnce(Return(false));
-    Sequence data_sequence;
-    EXPECT_CALL(data_endpoint_, Read)
-        .InSequence(data_sequence)
-        .WillOnce(WithArgs<1>(
-            [](grpc_event_engine::experimental::SliceBuffer* buffer) {
-              const std::string message_padding = {
-                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-              };
-              // Schedule mock_endpoint to read buffer.
-              grpc_event_engine::experimental::Slice slice(
-                  grpc_slice_from_cpp_string(message_padding));
-              buffer->Append(std::move(slice));
-              return true;
-            }));
-    EXPECT_CALL(data_endpoint_, Read)
-        .InSequence(data_sequence)
-        .WillOnce(WithArgs<1>(
-            [](grpc_event_engine::experimental::SliceBuffer* buffer) {
-              const std::string messages = {0x10, 0x0b, 0x67, 0x72, 0x70, 0x63,
-                                            0x2d, 0x73, 0x74, 0x61, 0x74, 0x75,
-                                            0x73, 0x01, 0x30, 0x01};
-              // Schedule mock_endpoint to read buffer.
-              grpc_event_engine::experimental::Slice slice(
-                  grpc_slice_from_cpp_string(messages));
-              buffer->Append(std::move(slice));
-              return true;
-            }));
+                const std::string trailers = {0x10, 0x0b, 0x67, 0x72, 0x70,
+                                              0x63, 0x2d, 0x73, 0x74, 0x61,
+                                              0x74, 0x75, 0x73, 0x01, 0x30};
+                // Schedule mock_endpoint to read buffer.
+                grpc_event_engine::experimental::Slice slice(
+                    grpc_slice_from_cpp_string(header + trailers));
+                buffer->Append(std::move(slice));
+                return true;
+              }));
+    }
+    EXPECT_CALL(control_endpoint_, Read)
+        .InSequence(control_endpoint_sequence)
+        .WillOnce(Return(false));
+    for (int i = 0; i < num_of_streams; i++) {
+      EXPECT_CALL(data_endpoint_, Read)
+          .InSequence(data_endpoint_sequence)
+          .WillOnce(WithArgs<1>(
+              [](grpc_event_engine::experimental::SliceBuffer* buffer) {
+                const std::string message_padding = {
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                };
+                // Schedule mock_endpoint to read buffer.
+                grpc_event_engine::experimental::Slice slice(
+                    grpc_slice_from_cpp_string(message_padding));
+                buffer->Append(std::move(slice));
+                return true;
+              }));
+      EXPECT_CALL(data_endpoint_, Read)
+          .InSequence(data_endpoint_sequence)
+          .WillOnce(WithArgs<1>(
+              [](grpc_event_engine::experimental::SliceBuffer* buffer) {
+                const std::string messages = {
+                    0x10, 0x0b, 0x67, 0x72, 0x70, 0x63, 0x2d, 0x73,
+                    0x74, 0x61, 0x74, 0x75, 0x73, 0x01, 0x30, 0x01};
+                // Schedule mock_endpoint to read buffer.
+                grpc_event_engine::experimental::Slice slice(
+                    grpc_slice_from_cpp_string(messages));
+                buffer->Append(std::move(slice));
+                return true;
+              }));
+    }
     client_transport_ = std::make_unique<ClientTransport>(
         std::make_unique<PromiseEndpoint>(
             std::unique_ptr<MockEndpoint>(control_endpoint_ptr_),
@@ -211,7 +223,6 @@ class ClientTransportTest : public ::testing::Test {
         std::static_pointer_cast<grpc_event_engine::experimental::EventEngine>(
             event_engine_));
   }
-
   std::vector<MessageHandle> CreateMessages(int num_of_messages) {
     std::vector<MessageHandle> messages;
     for (int i = 0; i < num_of_messages; i++) {
@@ -223,6 +234,39 @@ class ClientTransportTest : public ::testing::Test {
     }
     return messages;
   }
+
+  struct Result {};
+
+  auto Wait() {
+    std::cout << "\n start wait";
+    fflush(stdout);
+    return [this]() mutable -> Poll<Result> {
+      MutexLock lock(&mu_);
+      if (cleared_) {
+        std::cout << "\n done wait";
+        fflush(stdout);
+        return Result{};
+      } else {
+        std::cout << "\n start wait";
+        fflush(stdout);
+        waker_ = Activity::current()->MakeNonOwningWaker();
+        return Pending();
+      }
+    };
+  }
+
+  void Clear() {
+    MutexLock lock(&mu_);
+    cleared_ = true;
+    waker_.Wakeup();
+    std::cout << "\n wait up done";
+    fflush(stdout);
+  }
+
+ private:
+  Mutex mu_;
+  Waker waker_ ABSL_GUARDED_BY(mu_);
+  bool cleared_ ABSL_GUARDED_BY(mu_) = false;
 
  private:
   MockEndpoint* control_endpoint_ptr_;
@@ -247,13 +291,16 @@ class ClientTransportTest : public ::testing::Test {
   // Added for mutliple streams tests.
   Pipe<ServerMetadataHandle> pipe_server_intial_metadata_second_;
 
-  absl::AnyInvocable<void(absl::Status)> read_callback;
+  std::vector<absl::AnyInvocable<void(absl::Status)>> read_callback;
+  Sequence control_endpoint_sequence;
+  Sequence data_endpoint_sequence;
   const absl::Status kDummyErrorStatus =
       absl::ErrnoToStatus(5566, "just an error");
   static constexpr size_t kDummyRequestSize = 5566u;
 };
 
 TEST_F(ClientTransportTest, AddOneStream) {
+  InitialTransport(1);
   auto messages = CreateMessages(1);
   ClientMetadataHandle md;
   auto args = CallArgs{std::move(md),
@@ -279,7 +326,9 @@ TEST_F(ClientTransportTest, AddOneStream) {
                Seq(Join(client_transport_->AddStream(std::move(args)),
                         [this]() {
                           // Start read.
-                          read_callback(absl::OkStatus());
+                          std::cout << "\n read callback 1 call";
+                          fflush(stdout);
+                          read_callback[0](absl::OkStatus());
                           return absl::OkStatus();
                         }),
                    [this]() {
@@ -302,7 +351,9 @@ TEST_F(ClientTransportTest, AddOneStream) {
             EXPECT_TRUE(std::get<2>(ret).ok());
             return absl::OkStatus();
           }),
-      InlineWakeupScheduler(),
+      EventEngineWakeupScheduler(
+          std::static_pointer_cast<
+              grpc_event_engine::experimental::EventEngine>(event_engine_)),
       [&on_done](absl::Status status) { on_done.Call(std::move(status)); });
   // Wait until ClientTransport's internal activities to finish.
   event_engine_->TickUntilIdle();
@@ -310,6 +361,7 @@ TEST_F(ClientTransportTest, AddOneStream) {
 }
 
 TEST_F(ClientTransportTest, AddOneStreamWithEEFailed) {
+  InitialTransport(1);
   auto messages = CreateMessages(1);
   ClientMetadataHandle md;
   auto args = CallArgs{std::move(md),
@@ -345,7 +397,9 @@ TEST_F(ClientTransportTest, AddOneStreamWithEEFailed) {
                Seq(Join(client_transport_->AddStream(std::move(args)),
                         [this]() {
                           // Start read.
-                          read_callback(absl::OkStatus());
+                          std::cout << "\n read callback 1 call";
+                          fflush(stdout);
+                          read_callback[0](absl::OkStatus());
                           return absl::OkStatus();
                         }),
                    [this]() {
@@ -370,7 +424,9 @@ TEST_F(ClientTransportTest, AddOneStreamWithEEFailed) {
             EXPECT_TRUE(std::get<2>(ret).ok());
             return absl::OkStatus();
           }),
-      InlineWakeupScheduler(),
+      EventEngineWakeupScheduler(
+          std::static_pointer_cast<
+              grpc_event_engine::experimental::EventEngine>(event_engine_)),
       [&on_done](absl::Status status) { on_done.Call(std::move(status)); });
   // Wait until ClientTransport's internal activities to finish.
   event_engine_->TickUntilIdle();
@@ -378,6 +434,7 @@ TEST_F(ClientTransportTest, AddOneStreamWithEEFailed) {
 }
 
 TEST_F(ClientTransportTest, AddOneStreamMultipleMessages) {
+  InitialTransport(1);
   auto messages = CreateMessages(3);
   ClientMetadataHandle md;
   auto args = CallArgs{std::move(md),
@@ -407,7 +464,9 @@ TEST_F(ClientTransportTest, AddOneStreamMultipleMessages) {
                Seq(Join(client_transport_->AddStream(std::move(args)),
                         [this]() {
                           // Start read.
-                          read_callback(absl::OkStatus());
+                          std::cout << "\n read callback 1 call";
+                          fflush(stdout);
+                          read_callback[0](absl::OkStatus());
                           return absl::OkStatus();
                         }),
                    [this]() {
@@ -430,7 +489,9 @@ TEST_F(ClientTransportTest, AddOneStreamMultipleMessages) {
             EXPECT_TRUE(std::get<2>(ret).ok());
             return absl::OkStatus();
           }),
-      InlineWakeupScheduler(),
+      EventEngineWakeupScheduler(
+          std::static_pointer_cast<
+              grpc_event_engine::experimental::EventEngine>(event_engine_)),
       [&on_done](absl::Status status) { on_done.Call(std::move(status)); });
   // Wait until ClientTransport's internal activities to finish.
   event_engine_->TickUntilIdle();
@@ -438,6 +499,7 @@ TEST_F(ClientTransportTest, AddOneStreamMultipleMessages) {
 }
 
 TEST_F(ClientTransportTest, AddMultipleStreams) {
+  InitialTransport(2);
   auto messages = CreateMessages(2);
   ClientMetadataHandle md;
   auto first_stream_args =
@@ -480,9 +542,11 @@ TEST_F(ClientTransportTest, AddMultipleStreams) {
               // Receive message from first stream pipe.
               Seq(Join(client_transport_->AddStream(
                            std::move(first_stream_args)),
-                       [this]() {
+                       [this] {
                          // Start read.
-                         read_callback(absl::OkStatus());
+                         std::cout << "\n read callback 1 call";
+                         fflush(stdout);
+                         read_callback[0](absl::OkStatus());
                          return absl::OkStatus();
                        }),
                   [this]() {
@@ -493,11 +557,14 @@ TEST_F(ClientTransportTest, AddMultipleStreams) {
               // Receive message from second stream pipe.
               Seq(Join(client_transport_->AddStream(
                            std::move(second_stream_args)),
-                       [this]() {
-                         // Start read.
-                         read_callback(absl::OkStatus());
-                         return absl::OkStatus();
-                       }),
+                       Seq(Wait(),
+                           [this] {
+                             // Wait until first read finished.
+                             std::cout << "\n read callback 2 call";
+                             fflush(stdout);
+                             read_callback[1](absl::OkStatus());
+                             return absl::OkStatus();
+                           })),
                   [this]() {
                     this->pipe_server_to_client_messages_second_.sender.Close();
                     this->pipe_server_intial_metadata_second_.sender.Close();
@@ -508,7 +575,9 @@ TEST_F(ClientTransportTest, AddMultipleStreams) {
                   [this](NextResult<ServerMetadataHandle> ret) {
                     return pipe_server_to_client_messages_.receiver.Next();
                   },
-                  [](NextResult<MessageHandle> ret) {
+                  [this](NextResult<MessageHandle> ret) {
+                    Clear();
+                    Activity::current()->ForceWakeup();
                     return absl::OkStatus();
                   }),
               Seq(
@@ -531,7 +600,9 @@ TEST_F(ClientTransportTest, AddMultipleStreams) {
             EXPECT_TRUE(std::get<5>(ret).ok());
             return absl::OkStatus();
           }),
-      InlineWakeupScheduler(),
+      EventEngineWakeupScheduler(
+          std::static_pointer_cast<
+              grpc_event_engine::experimental::EventEngine>(event_engine_)),
       [&on_done](absl::Status status) { on_done.Call(std::move(status)); });
   // Wait until ClientTransport's internal activities to finish.
   event_engine_->TickUntilIdle();
@@ -539,6 +610,7 @@ TEST_F(ClientTransportTest, AddMultipleStreams) {
 }
 
 TEST_F(ClientTransportTest, AddMultipleStreamsMultipleMessages) {
+  InitialTransport(2);
   auto messages = CreateMessages(6);
   ClientMetadataHandle md;
   auto first_stream_args =
@@ -591,7 +663,7 @@ TEST_F(ClientTransportTest, AddMultipleStreamsMultipleMessages) {
                            std::move(first_stream_args)),
                        [this]() {
                          // Start read.
-                         read_callback(absl::OkStatus());
+                         read_callback[0](absl::OkStatus());
                          return absl::OkStatus();
                        }),
                   [this]() {
@@ -602,11 +674,12 @@ TEST_F(ClientTransportTest, AddMultipleStreamsMultipleMessages) {
               // Receive message from second stream pipe.
               Seq(Join(client_transport_->AddStream(
                            std::move(second_stream_args)),
-                       [this]() {
-                         // Start read.
-                         read_callback(absl::OkStatus());
-                         return absl::OkStatus();
-                       }),
+                       Seq(Wait(),
+                           [this]() {
+                             // Start read.
+                             read_callback[1](absl::OkStatus());
+                             return absl::OkStatus();
+                           })),
                   [this]() {
                     this->pipe_server_to_client_messages_second_.sender.Close();
                     this->pipe_server_intial_metadata_second_.sender.Close();
@@ -617,7 +690,8 @@ TEST_F(ClientTransportTest, AddMultipleStreamsMultipleMessages) {
                   [this](NextResult<ServerMetadataHandle> ret) {
                     return pipe_server_to_client_messages_.receiver.Next();
                   },
-                  [](NextResult<MessageHandle> ret) {
+                  [this](NextResult<MessageHandle> ret) {
+                    Clear();
                     return absl::OkStatus();
                   }),
               Seq(
@@ -640,7 +714,9 @@ TEST_F(ClientTransportTest, AddMultipleStreamsMultipleMessages) {
             EXPECT_TRUE(std::get<5>(ret).ok());
             return absl::OkStatus();
           }),
-      InlineWakeupScheduler(),
+      EventEngineWakeupScheduler(
+          std::static_pointer_cast<
+              grpc_event_engine::experimental::EventEngine>(event_engine_)),
       [&on_done](absl::Status status) { on_done.Call(std::move(status)); });
   // Wait until ClientTransport's internal activities to finish.
   event_engine_->TickUntilIdle();

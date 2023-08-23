@@ -97,6 +97,8 @@ void PromiseEndpoint::ReadCallback(absl::Status status,
         ReadCallback(absl::OkStatus(), num_bytes_requested);
       }
     } else {
+      std::cout << "\n endpoint read finish  ";
+      fflush(stdout);
       MutexLock lock(&read_mutex_);
       read_result_ = status;
       read_waker_.Wakeup();

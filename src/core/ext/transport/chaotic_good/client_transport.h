@@ -21,6 +21,8 @@
 #include <stdio.h>
 
 #include <initializer_list>  // IWYU pragma: keep
+#include <iostream>
+#include <map>
 #include <memory>
 #include <type_traits>
 #include <utility>
@@ -72,9 +74,17 @@ class ClientTransport {
     // At this point, the connection is set up.
     // Start sending data frames.
     uint64_t stream_id;
+    // Max buffer is set to 4, so that for stream reads each time it will queue
+    // at most 2 frames.
+    std::shared_ptr<MpscReceiver<ServerFrame>> server_frames =
+        std::make_shared<MpscReceiver<ServerFrame>>(4);
     {
       MutexLock lock(&mu_);
       stream_id = next_stream_id_++;
+      stream_map_.insert(
+          std::pair<uint32_t, std::shared_ptr<MpscSender<ServerFrame>>>(
+              stream_id, std::make_shared<MpscSender<ServerFrame>>(
+                             server_frames->MakeSender())));
     }
     return Join(
         // Continuously send data frame with client to server messages.
@@ -84,6 +94,9 @@ class ClientTransport {
                      std::move(call_args.client_initial_metadata),
                  outgoing_frames = outgoing_frames_.MakeSender()](
                     MessageHandle result) mutable {
+                  std::cout << "\n AddStream " << stream_id
+                            << " write client frame";
+                  fflush(stdout);
                   ClientFragmentFrame frame;
                   frame.stream_id = stream_id;
                   frame.message = std::move(result);
@@ -95,6 +108,8 @@ class ClientTransport {
                   return Seq(
                       outgoing_frames.Send(ClientFrame(std::move(frame))),
                       [](bool success) -> absl::Status {
+                        std::cout << "\n AddStream write client frame done";
+                        fflush(stdout);
                         if (!success) {
                           return absl::InternalError(
                               "Send frame to outgoing_frames failed.");
@@ -103,14 +118,18 @@ class ClientTransport {
                       });
                 }),
         // Continuously receive incoming frames and save results to call_args.
-        Loop([this, call_args = std::move(call_args)] {
+        Loop([call_args = std::move(call_args),
+              server_frame = std::move(server_frames), stream_id]() mutable {
           return Seq(
               // Receive incoming frame.
-              this->incoming_frames_.Next(),
+              server_frame->Next(),
               // Save incomming frame results to call_args.
               [server_initial_metadata = call_args.server_initial_metadata,
-               server_to_client_message = call_args.server_to_client_messages](
-                  ServerFrame server_frame) mutable {
+               server_to_client_message = call_args.server_to_client_messages,
+               stream_id](ServerFrame server_frame) mutable {
+                std::cout << "\n AddStream " << stream_id
+                          << " receive server frame";
+                fflush(stdout);
                 auto frame = std::make_shared<ServerFragmentFrame>(
                     std::move(absl::get<ServerFragmentFrame>(server_frame)));
                 return Seq(
@@ -145,12 +164,10 @@ class ClientTransport {
   // Max buffer is set to 4, so that for stream writes each time it will queue
   // at most 2 frames.
   MpscReceiver<ClientFrame> outgoing_frames_;
-  // Max buffer is set to 4, so that for stream reads each time it will queue
-  // at most 2 frames.
-  MpscReceiver<ServerFrame> incoming_frames_;
-  MpscSender<ServerFrame> incoming_frames_sender_;
   Mutex mu_;
   uint32_t next_stream_id_ ABSL_GUARDED_BY(mu_) = 1;
+  std::map<uint32_t, std::shared_ptr<MpscSender<ServerFrame>>> stream_map_
+      ABSL_GUARDED_BY(mu_);
   ActivityPtr writer_;
   ActivityPtr reader_;
   std::unique_ptr<PromiseEndpoint> control_endpoint_;
@@ -167,6 +184,9 @@ class ClientTransport {
   ScopedArenaPtr arena_;
   // Use to synchronize writer_ and reader_ activity with outside activities;
   std::shared_ptr<grpc_event_engine::experimental::EventEngine> event_engine_;
+  // Pipe<ServerFrame> incoming_server_frames_;
+  // PipeReceiver<ServerFrame> incoming_server_frames_receiver_;
+  // PipeSender<ServerFrame> incoming_server_frames_sender_;
 };
 
 }  // namespace chaotic_good

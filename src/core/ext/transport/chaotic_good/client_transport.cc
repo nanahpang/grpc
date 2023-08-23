@@ -52,8 +52,6 @@ ClientTransport::ClientTransport(
     std::unique_ptr<PromiseEndpoint> data_endpoint,
     std::shared_ptr<grpc_event_engine::experimental::EventEngine> event_engine)
     : outgoing_frames_(MpscReceiver<ClientFrame>(4)),
-      incoming_frames_(MpscReceiver<ServerFrame>(4)),
-      incoming_frames_sender_(incoming_frames_.MakeSender()),
       control_endpoint_(std::move(control_endpoint)),
       data_endpoint_(std::move(data_endpoint)),
       control_endpoint_write_buffer_(SliceBuffer()),
@@ -83,6 +81,9 @@ ClientTransport::ClientTransport(
                               control_endpoint_write_buffer_.c_slice_buffer()
                                   ->slices[0])))
                           .value();
+                  std::cout << "\n writer  " << frame_header.stream_id
+                            << " write frame";
+                  fflush(stdout);
                   std::string message_padding(frame_header.message_padding,
                                               '0');
                   Slice slice(grpc_slice_from_cpp_string(message_padding));
@@ -110,6 +111,8 @@ ClientTransport::ClientTransport(
         // Finish writes and return status.
         [](std::tuple<absl::Status, absl::Status> ret)
             -> LoopCtl<absl::Status> {
+          std::cout << "\n writer write done";
+          fflush(stdout);
           // If writes failed, return failure status.
           if (!(std::get<0>(ret).ok() || std::get<1>(ret).ok())) {
             // TODO(ladynana): handle the promise endpoint write failures with
@@ -139,6 +142,8 @@ ClientTransport::ClientTransport(
                   reinterpret_cast<const uint8_t*>(GRPC_SLICE_START_PTR(
                       read_buffer->c_slice_buffer()->slices[0])))
                   .value();
+          std::cout << "\n reader read stream  " << frame_header_.stream_id;
+          fflush(stdout);
           // Read header and trailers from control endpoint.
           // Read message padding and message from data endpoint.
           return Join(
@@ -147,6 +152,9 @@ ClientTransport::ClientTransport(
                   [this](absl::StatusOr<SliceBuffer> read_buffer) {
                     // TODO(ladynana): handle read failure here.
                     GPR_ASSERT(read_buffer.ok());
+                    std::cout << "\n reader read stream  "
+                              << frame_header_.stream_id << " messages";
+                    fflush(stdout);
                     return data_endpoint_->Read(frame_header_.message_length);
                   }));
         },
@@ -169,11 +177,21 @@ ClientTransport::ClientTransport(
           // Move message into frame.
           frame->message = arena_->MakePooled<Message>(
               std::move(data_endpoint_read_buffer_), 0);
-          incoming_frames_sender_ = incoming_frames_.MakeSender();
-          return incoming_frames_sender_.Send(ServerFrame(std::move(*frame)));
+          // incoming_frames_sender_ = incoming_frames_.MakeSender();
+          std::cout << "\n reader_ stream " << frame_header_.stream_id
+                    << " send messages";
+          fflush(stdout);
+          std::shared_ptr<MpscSender<ServerFrame>> sender;
+          {
+            MutexLock lock(&mu_);
+            sender = stream_map_[frame->stream_id];
+          }
+          return sender->Send(ServerFrame(std::move(*frame)));
         },
         // Check if read_loop_ should continue.
         [](bool ret) -> LoopCtl<absl::Status> {
+          std::cout << "\n reader_ send messages done " << ret;
+          fflush(stdout);
           if (ret) {
             // Send incoming frames successfully.
             return Continue();
