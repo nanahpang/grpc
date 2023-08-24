@@ -46,7 +46,7 @@
 #include "src/core/lib/promise/loop.h"
 #include "src/core/lib/promise/mpsc.h"
 #include "src/core/lib/promise/pipe.h"
-#include "src/core/lib/promise/seq.h"
+#include "src/core/lib/promise/try_seq.h"
 #include "src/core/lib/resource_quota/arena.h"
 #include "src/core/lib/resource_quota/memory_quota.h"
 #include "src/core/lib/slice/slice_buffer.h"
@@ -105,7 +105,7 @@ class ClientTransport {
                     frame.headers = std::move(client_initial_metadata);
                     initial_frame = false;
                   }
-                  return Seq(
+                  return TrySeq(
                       outgoing_frames.Send(ClientFrame(std::move(frame))),
                       [](bool success) -> absl::Status {
                         std::cout << "\n AddStream write client frame done";
@@ -120,7 +120,7 @@ class ClientTransport {
         // Continuously receive incoming frames and save results to call_args.
         Loop([call_args = std::move(call_args),
               server_frame = std::move(server_frames), stream_id]() mutable {
-          return Seq(
+          return TrySeq(
               // Receive incoming frame.
               server_frame->Next(),
               // Save incomming frame results to call_args.
@@ -132,7 +132,7 @@ class ClientTransport {
                 fflush(stdout);
                 auto frame = std::make_shared<ServerFragmentFrame>(
                     std::move(absl::get<ServerFragmentFrame>(server_frame)));
-                return Seq(
+                return TrySeq(
                     If((frame->headers != nullptr),
                        [server_initial_metadata,
                         headers = std::move(frame->headers)]() mutable {
@@ -148,7 +148,7 @@ class ClientTransport {
                        },
                        [] { return false; }),
                     If((frame->trailers != nullptr),
-                       [trailers = std::move(frame->trailers)]() mutable
+                       [trailers = std::move(frame->trailers)]()
                        -> LoopCtl<absl::Status> {
                          // TODO(ladynana): return ServerMetadataHandler
                          return absl::OkStatus();

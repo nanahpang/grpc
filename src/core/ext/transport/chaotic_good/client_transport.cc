@@ -36,6 +36,7 @@
 #include "src/core/lib/promise/event_engine_wakeup_scheduler.h"
 #include "src/core/lib/promise/join.h"
 #include "src/core/lib/promise/loop.h"
+#include "src/core/lib/promise/try_join.h"
 #include "src/core/lib/resource_quota/arena.h"
 #include "src/core/lib/resource_quota/memory_quota.h"
 #include "src/core/lib/resource_quota/resource_quota.h"
@@ -64,7 +65,7 @@ ClientTransport::ClientTransport(
       arena_(MakeScopedArena(1024, &memory_allocator_)),
       event_engine_(event_engine) {
   auto write_loop = Loop([this] {
-    return Seq(
+    return TrySeq(
         // Get next outgoing frame.
         this->outgoing_frames_.Next(),
         // Construct data buffers that will be sent to the endpoints.
@@ -130,43 +131,32 @@ ClientTransport::ClientTransport(
                    status.code() == absl::StatusCode::kInternal);
       });
   auto read_loop = Loop([this] {
-    return Seq(
+    return TrySeq(
         // Read frame header from control endpoint.
         this->control_endpoint_->Read(frame_header_size_),
         // Parse frame header and return.
-        [this](absl::StatusOr<SliceBuffer> read_buffer) mutable {
-          // TODO(ladynana): handle read failure here.
-          GPR_ASSERT(read_buffer.ok());
+        [this](SliceBuffer read_buffer) mutable {
           frame_header_ =
               FrameHeader::Parse(
                   reinterpret_cast<const uint8_t*>(GRPC_SLICE_START_PTR(
-                      read_buffer->c_slice_buffer()->slices[0])))
+                      read_buffer.c_slice_buffer()->slices[0])))
                   .value();
           std::cout << "\n reader read stream  " << frame_header_.stream_id;
           fflush(stdout);
           // Read header and trailers from control endpoint.
           // Read message padding and message from data endpoint.
-          return Join(
+          return TryJoin(
               control_endpoint_->Read(frame_header_.GetFrameLength()),
-              Seq(data_endpoint_->Read(frame_header_.message_padding),
-                  [this](absl::StatusOr<SliceBuffer> read_buffer) {
-                    // TODO(ladynana): handle read failure here.
-                    GPR_ASSERT(read_buffer.ok());
-                    std::cout << "\n reader read stream  "
-                              << frame_header_.stream_id << " messages";
-                    fflush(stdout);
-                    return data_endpoint_->Read(frame_header_.message_length);
-                  }));
+              TrySeq(data_endpoint_->Read(frame_header_.message_padding),
+                     [this](SliceBuffer read_buffer) {
+                       return data_endpoint_->Read(
+                           frame_header_.message_length);
+                     }));
         },
         // Finish reads and send receive frame to incoming_frames.
-        [this](
-            std::tuple<absl::StatusOr<SliceBuffer>, absl::StatusOr<SliceBuffer>>
-                ret) mutable {
-          // TODO(ladynana): handle read failure here.
-          GPR_ASSERT(std::get<0>(ret).ok());
-          GPR_ASSERT(std::get<1>(ret).ok());
-          control_endpoint_read_buffer_ = std::move(*std::get<0>(ret));
-          data_endpoint_read_buffer_ = std::move(*std::get<1>(ret));
+        [this](std::tuple<SliceBuffer, SliceBuffer> ret) mutable {
+          control_endpoint_read_buffer_ = std::move(std::get<0>(ret));
+          data_endpoint_read_buffer_ = std::move(std::get<1>(ret));
           auto frame = std::make_shared<ServerFragmentFrame>();
           // Initialized to get this_cpu() info in global_stat().
           ExecCtx exec_ctx;

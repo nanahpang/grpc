@@ -17,7 +17,6 @@
 
 #include <grpc/support/port_platform.h>
 
-#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 
