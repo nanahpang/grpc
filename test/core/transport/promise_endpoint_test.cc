@@ -16,6 +16,8 @@
 
 // IWYU pragma: no_include <sys/socket.h>
 
+#include <stddef.h>
+
 #include <cstring>
 #include <memory>
 #include <string>
