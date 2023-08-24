@@ -148,8 +148,8 @@ class ClientTransport {
                        },
                        [] { return false; }),
                     If((frame->trailers != nullptr),
-                       [trailers = std::move(frame->trailers)]()
-                       -> LoopCtl<absl::Status> {
+                       [trailers = std::move(
+                            frame->trailers)]() -> LoopCtl<absl::Status> {
                          // TODO(ladynana): return ServerMetadataHandler
                          return absl::OkStatus();
                        },
