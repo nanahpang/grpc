@@ -5798,7 +5798,9 @@ grpc_cc_library(
         "arena",
         "bitset",
         "chaotic_good_frame_header",
+        "memory_quota",
         "no_destruct",
+        "resource_quota",
         "slice",
         "slice_buffer",
         "status_helper",
@@ -5807,6 +5809,7 @@ grpc_cc_library(
         "//:grpc_base",
         "//:hpack_encoder",
         "//:hpack_parser",
+        "//:ref_counted_ptr",
     ],
 )
 
@@ -5953,6 +5956,51 @@ grpc_cc_library(
         "slice_buffer",
         "//:event_engine_base_hdrs",
         "//:gpr",
+    ],
+)
+
+grpc_cc_library(
+    name = "chaotic_good_client_transport",
+    srcs = [
+        "ext/transport/chaotic_good/client_transport.cc",
+    ],
+    hdrs = [
+        "ext/transport/chaotic_good/client_transport.h",
+    ],
+    external_deps = [
+        "absl/base:core_headers",
+        "absl/status",
+        "absl/status:statusor",
+        "absl/types:variant",
+    ],
+    language = "c++",
+    deps = [
+        "activity",
+        "arena",
+        "chaotic_good_frame",
+        "chaotic_good_frame_header",
+        "event_engine_wakeup_scheduler",
+        "for_each",
+        "grpc_promise_endpoint",
+        "if",
+        "join",
+        "loop",
+        "match",
+        "memory_quota",
+        "mpsc",
+        "pipe",
+        "resource_quota",
+        "slice",
+        "slice_buffer",
+        "try_join",
+        "try_seq",
+        "//:exec_ctx",
+        "//:gpr",
+        "//:gpr_platform",
+        "//:grpc_base",
+        "//:hpack_encoder",
+        "//:hpack_parser",
+        "//:ref_counted_ptr",
     ],
 )
 

@@ -18,8 +18,10 @@
 #include <grpc/support/port_platform.h>
 
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
+#include <iostream>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -577,6 +579,8 @@ class PipeReceiver {
         [center = center_->Ref()](absl::optional<T> value) {
           bool open = value.has_value();
           bool cancelled = center->cancelled();
+          std::cout << "\n receiver next " << open;
+          fflush(stdout);
           return If(
               open,
               [center = std::move(center), value = std::move(value)]() mutable {

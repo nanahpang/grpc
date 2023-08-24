@@ -17,10 +17,11 @@
 
 #include <grpc/support/port_platform.h>
 
-#include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <utility>
 
@@ -51,6 +52,9 @@ class PromiseEndpoint {
           endpoint,
       SliceBuffer already_received);
   ~PromiseEndpoint();
+  /// Prevent copying and moving of PromiseEndpoint.
+  PromiseEndpoint(const PromiseEndpoint&) = delete;
+  PromiseEndpoint(PromiseEndpoint&&) = delete;
 
   // Returns a promise that resolves to a `absl::Status` indicating the result
   // of the write operation.
@@ -98,6 +102,8 @@ class PromiseEndpoint {
   // `Read()` before the previous read finishes. Doing that results in
   // undefined behavior.
   auto Read(size_t num_bytes) {
+    std::cout << "\n endpoint read start  ";
+    fflush(stdout);
     ReleasableMutexLock lock(&read_mutex_);
     // Assert previous read finishes.
     GPR_ASSERT(!read_result_.has_value());

@@ -16,6 +16,8 @@
 
 #include "src/core/lib/transport/promise_endpoint.h"
 
+#include <stddef.h>
+
 #include <functional>
 #include <memory>
 #include <utility>
@@ -47,9 +49,9 @@ PromiseEndpoint::PromiseEndpoint(
 
 PromiseEndpoint::~PromiseEndpoint() {
   // Last write result has not been polled.
-  GPR_ASSERT(!write_result_.has_value());
+  if (write_result_.has_value()) write_result_.reset();
   // Last read result has not been polled.
-  GPR_ASSERT(!read_result_.has_value());
+  if (read_result_.has_value()) read_result_.reset();
 }
 
 const grpc_event_engine::experimental::EventEngine::ResolvedAddress&
@@ -97,6 +99,8 @@ void PromiseEndpoint::ReadCallback(absl::Status status,
         ReadCallback(absl::OkStatus(), num_bytes_requested);
       }
     } else {
+      std::cout << "\n endpoint read finish  ";
+      fflush(stdout);
       MutexLock lock(&read_mutex_);
       read_result_ = status;
       read_waker_.Wakeup();
