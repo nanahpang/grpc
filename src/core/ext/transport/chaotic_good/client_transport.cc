@@ -82,8 +82,7 @@ ClientTransport::ClientTransport(
                               control_endpoint_write_buffer_.c_slice_buffer()
                                   ->slices[0])))
                           .value();
-                  std::cout << "\n writer  " << frame_header.stream_id
-                            << " write frame";
+                  std::cout << "\n writer write frame to stream " << frame_header.stream_id;
                   fflush(stdout);
                   std::string message_padding(frame_header.message_padding,
                                               '0');

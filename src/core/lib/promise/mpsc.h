@@ -180,6 +180,11 @@ class MpscReceiver {
       return Pending{};
     };
   }
+  void CloseWithError() {
+    if (center_ != nullptr) {
+      center_->ReceiverClosed();
+    }
+  }
 
  private:
   // Received items. We move out of here one by one, but don't resize the

@@ -247,7 +247,7 @@ class ClientTransportTest : public ::testing::Test {
         fflush(stdout);
         return Result{};
       } else {
-        std::cout << "\n start wait";
+        std::cout << "\n pending";
         fflush(stdout);
         waker_ = Activity::current()->MakeNonOwningWaker();
         return Pending();
