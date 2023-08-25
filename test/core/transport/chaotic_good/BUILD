@@ -92,7 +92,6 @@ grpc_cc_test(
     deps = [
         "//:grpc",
         "//:iomgr_timer",
-        "//:promise",
         "//:ref_counted_ptr",
         "//src/core:activity",
         "//src/core:arena",
@@ -106,9 +105,7 @@ grpc_cc_test(
         "//src/core:seq",
         "//src/core:slice",
         "//src/core:slice_buffer",
-        "//src/core:wait_set",
         "//test/core/event_engine/fuzzing_event_engine",
         "//test/core/event_engine/fuzzing_event_engine:fuzzing_event_engine_proto",
-        "//test/core/promise:test_wakeup_schedulers",
     ],
 )
