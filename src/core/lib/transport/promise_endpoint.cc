@@ -16,8 +16,6 @@
 
 #include "src/core/lib/transport/promise_endpoint.h"
 
-#include <stddef.h>
-
 #include <functional>
 #include <memory>
 #include <utility>

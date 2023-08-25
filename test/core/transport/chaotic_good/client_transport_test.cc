@@ -20,6 +20,7 @@
 
 #include <algorithm>  // IWYU pragma: keep
 #include <memory>
+#include <string>
 #include <tuple>
 #include <vector>  // IWYU pragma: keep
 
@@ -30,6 +31,7 @@
 
 #include <grpc/event_engine/event_engine.h>
 #include <grpc/event_engine/memory_allocator.h>
+#include <grpc/event_engine/slice.h>
 #include <grpc/event_engine/slice_buffer.h>
 #include <grpc/grpc.h>
 
@@ -40,17 +42,15 @@
 #include "src/core/lib/promise/join.h"
 #include "src/core/lib/promise/pipe.h"
 #include "src/core/lib/promise/poll.h"
-#include "src/core/lib/promise/promise.h"
 #include "src/core/lib/promise/seq.h"
-#include "src/core/lib/promise/wait_set.h"
 #include "src/core/lib/resource_quota/arena.h"
 #include "src/core/lib/resource_quota/memory_quota.h"
 #include "src/core/lib/resource_quota/resource_quota.h"
 #include "src/core/lib/slice/slice.h"
 #include "src/core/lib/slice/slice_buffer.h"
+#include "src/core/lib/slice/slice_internal.h"
 #include "test/core/event_engine/fuzzing_event_engine/fuzzing_event_engine.h"
 #include "test/core/event_engine/fuzzing_event_engine/fuzzing_event_engine.pb.h"
-#include "test/core/promise/test_wakeup_schedulers.h"
 
 using testing::MockFunction;
 using testing::Return;
@@ -268,7 +268,6 @@ class ClientTransportTest : public ::testing::Test {
   Waker waker_ ABSL_GUARDED_BY(mu_);
   bool cleared_ ABSL_GUARDED_BY(mu_) = false;
 
- private:
   MockEndpoint* control_endpoint_ptr_;
   MockEndpoint* data_endpoint_ptr_;
   size_t initial_arena_size = 1024;

@@ -153,7 +153,9 @@ class ClientTransport {
                          // TODO(ladynana): return ServerMetadataHandler
                          return std::move(trailers);
                        },
-                       []() -> LoopCtl<ServerMetadataHandle> { return Continue(); }));
+                       []() -> LoopCtl<ServerMetadataHandle> {
+                         return Continue();
+                       }));
               });
         })
 
