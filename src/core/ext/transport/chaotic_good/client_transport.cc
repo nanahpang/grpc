@@ -50,7 +50,7 @@ ClientTransport::ClientTransport(
     std::unique_ptr<PromiseEndpoint> control_endpoint,
     std::unique_ptr<PromiseEndpoint> data_endpoint,
     std::shared_ptr<grpc_event_engine::experimental::EventEngine> event_engine)
-    : outgoing_frames_(MpscReceiver<ClientFrame>(4)),
+    : outgoing_frames_(std::make_shared<MpscReceiver<ClientFrame>>(4)),
       control_endpoint_(std::move(control_endpoint)),
       data_endpoint_(std::move(data_endpoint)),
       control_endpoint_write_buffer_(SliceBuffer()),
@@ -65,7 +65,7 @@ ClientTransport::ClientTransport(
   auto write_loop = Loop([this] {
     return TrySeq(
         // Get next outgoing frame.
-        this->outgoing_frames_.Next(),
+        this->outgoing_frames_->Next(),
         // Construct data buffers that will be sent to the endpoints.
         [this](ClientFrame client_frame) {
           MatchMutable(
@@ -117,11 +117,14 @@ ClientTransport::ClientTransport(
   writer_ = MakeActivity(
       // Continuously write next outgoing frames to promise endpoints.
       std::move(write_loop), EventEngineWakeupScheduler(event_engine_),
-      [](absl::Status status) {
+      [this](absl::Status status) {
         GPR_ASSERT(status.code() == absl::StatusCode::kCancelled ||
                    status.code() == absl::StatusCode::kInternal);
-        // TODO(ladynana): handle the promise endpoint write failures with
-        // outgoing_frames.close() once available.
+        if (status.code() == absl::StatusCode::kInternal) {
+          std::cout << "\n write abort with error.";
+          fflush(stdout);
+          this->AbortWithError();
+        }
       });
   auto read_loop = Loop([this] {
     return TrySeq(
@@ -181,11 +184,14 @@ ClientTransport::ClientTransport(
   reader_ = MakeActivity(
       // Continuously read next incoming frames from promise endpoints.
       std::move(read_loop), EventEngineWakeupScheduler(event_engine_),
-      [](absl::Status status) {
+      [this](absl::Status status) {
         GPR_ASSERT(status.code() == absl::StatusCode::kCancelled ||
                    status.code() == absl::StatusCode::kInternal);
-        // TODO(ladynana): handle the promise endpoint read failures with
-        // iterating stream_map_ and close all the pipes once available.
+        if (status.code() == absl::StatusCode::kInternal) {
+          std::cout << "\n read abort with error.";
+          fflush(stdout);
+          this->AbortWithError();
+        }
       });
 }
 

@@ -413,47 +413,29 @@ TEST_F(ClientTransportTest, AddOneStreamWithWriteFailed) {
                        [this]() {
                          // Start read from endpoints.
                          read_callback[0](absl::OkStatus());
+                         std::cout << "\n read callback called.";
+                         fflush(stdout);
                          return absl::OkStatus();
                        }),
                   [](std::tuple<absl::StatusOr<ServerMetadataHandle>,
                                 absl::Status>
                          ret) {
                     // AddStream will finish with server trailers:
-                    // "grpc-status:0".
+                    // "grpc-status:Unavailable".
                     EXPECT_EQ(std::get<0>(ret)
                                   .value()
                                   ->get(GrpcStatusMetadata())
                                   .value(),
-                              grpc_status_code::GRPC_STATUS_OK);
+                              grpc_status_code::GRPC_STATUS_UNAVAILABLE);
                     return absl::OkStatus();
                   }),
               // Receive messages from control/data endpoints.
-              Seq(
-                  // Receive server initial metadata.
-                  Map(pipe_server_intial_metadata_.receiver.Next(),
-                      [](NextResult<ServerMetadataHandle> r) {
-                        // Expect value: ":path: /demo.Service/Step"
-                        EXPECT_TRUE(r.has_value());
-                        EXPECT_EQ(r.value()
-                                      ->get_pointer(HttpPathMetadata())
-                                      ->as_string_view(),
-                                  "/demo.Service/Step");
-                        return absl::OkStatus();
-                      }),
-                  // Receive server to client messages.
-                  Map(pipe_server_to_client_messages_.receiver.Next(),
-                      [this](NextResult<MessageHandle> r) {
-                        EXPECT_TRUE(r.has_value());
-                        EXPECT_EQ(r.value()->payload()->JoinIntoString(),
-                                  message);
-                        return absl::OkStatus();
-                      }),
-                  [this] {
-                    // Close pipes after receive message.
-                    pipe_server_to_client_messages_.sender.Close();
-                    pipe_server_intial_metadata_.sender.Close();
-                    return absl::OkStatus();
-                  })),
+              [this] {
+                // Close pipes after receive message.
+                pipe_server_to_client_messages_.sender.Close();
+                pipe_server_intial_metadata_.sender.Close();
+                return absl::OkStatus();
+              }),
           // Once complete, verify successful sending and the received value.
           [](const std::tuple<absl::Status, absl::Status, absl::Status>& ret) {
             // TODO(ladynana): change these expectations to errors after the

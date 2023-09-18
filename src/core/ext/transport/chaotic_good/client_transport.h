@@ -18,11 +18,14 @@
 #include <grpc/support/port_platform.h>
 
 #include <stdint.h>
+#include <stdio.h>
 
 #include <cstddef>
 #include <initializer_list>  // IWYU pragma: keep
+#include <iostream>
 #include <map>
 #include <memory>
+#include <string>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -34,13 +37,14 @@
 
 #include <grpc/event_engine/event_engine.h>
 #include <grpc/event_engine/memory_allocator.h>
-#include <grpc/support/log.h>
+#include <grpc/status.h>
 
 #include "src/core/ext/transport/chaotic_good/frame.h"
 #include "src/core/ext/transport/chaotic_good/frame_header.h"
 #include "src/core/ext/transport/chttp2/transport/hpack_encoder.h"
 #include "src/core/ext/transport/chttp2/transport/hpack_parser.h"
 #include "src/core/lib/gprpp/sync.h"
+#include "src/core/lib/gprpp/time.h"
 #include "src/core/lib/promise/activity.h"
 #include "src/core/lib/promise/for_each.h"
 #include "src/core/lib/promise/if.h"
@@ -53,7 +57,10 @@
 #include "src/core/lib/promise/try_seq.h"
 #include "src/core/lib/resource_quota/arena.h"
 #include "src/core/lib/resource_quota/memory_quota.h"
+#include "src/core/lib/slice/slice.h"
 #include "src/core/lib/slice/slice_buffer.h"
+#include "src/core/lib/transport/error_utils.h"
+#include "src/core/lib/transport/metadata_batch.h"
 #include "src/core/lib/transport/promise_endpoint.h"
 #include "src/core/lib/transport/transport.h"
 
@@ -74,6 +81,29 @@ class ClientTransport {
       reader_.reset();
     }
   }
+  void AbortWithError() {
+    // Transport becomes unavailable if the endpoint write/read failed,
+    // therefore, stop writer_/reader_ activity and abort on-going stream calls.
+    std::cout << "\n close outgoing frame.";
+    fflush(stdout);
+    if (outgoing_frames_ != nullptr) {
+      outgoing_frames_->MarkClosed();
+    }
+    // Handle the promise endpoint read failures with
+    // iterating stream_map_ and close all the pipes once available.
+    std::map<uint32_t, std::shared_ptr<InterActivityPipe<
+                           ServerFrame, server_frame_queue_size_>::Sender>>
+        stream_map;
+    {
+      MutexLock lock(&mu_);
+      stream_map = stream_map_;
+    }
+    for (const auto& i : stream_map) {
+      std::cout << "\n close sender.";
+      fflush(stdout);
+      i.second->MarkClose();
+    }
+  }
   auto AddStream(CallArgs call_args) {
     // At this point, the connection is set up.
     // Start sending data frames.
@@ -90,6 +120,7 @@ class ClientTransport {
                              ServerFrame, server_frame_queue_size_>::Sender>(
                              std::move(server_frames.sender))));
     }
+    auto outgoing_frame = outgoing_frames_->MakeSender();
     return TrySeq(
         TryJoin(
             // Continuously send client frame with client to server messages.
@@ -97,7 +128,7 @@ class ClientTransport {
                     [stream_id, initial_frame = true,
                      client_initial_metadata =
                          std::move(call_args.client_initial_metadata),
-                     outgoing_frames = outgoing_frames_.MakeSender()](
+                     outgoing_frame = std::move(outgoing_frame)](
                         MessageHandle result) mutable {
                       ClientFragmentFrame frame;
                       frame.stream_id = stream_id;
@@ -108,12 +139,14 @@ class ClientTransport {
                         initial_frame = false;
                       }
                       return TrySeq(
-                          outgoing_frames.Send(ClientFrame(std::move(frame))),
+                          outgoing_frame.Send(ClientFrame(std::move(frame))),
                           [](bool success) -> absl::Status {
                             if (!success) {
                               return absl::InternalError(
                                   "Send frame to outgoing_frames failed.");
                             }
+                            std::cout << "\n write send frame done.";
+                            fflush(stdout);
                             return absl::OkStatus();
                           });
                     }),
@@ -122,42 +155,72 @@ class ClientTransport {
             Loop([server_initial_metadata = call_args.server_initial_metadata,
                   server_to_client_messages =
                       call_args.server_to_client_messages,
-                  receiver = std::move(server_frames.receiver)]() mutable {
+                  receiver = std::move(server_frames.receiver),
+                  this]() mutable {
               return TrySeq(
                   // Receive incoming server frame.
                   receiver.Next(),
                   // Save incomming frame results to call_args.
-                  [server_initial_metadata, server_to_client_messages](
-                      absl::optional<ServerFrame> server_frame) mutable {
-                    GPR_ASSERT(server_frame.has_value());
-                    auto frame = std::move(
-                        absl::get<ServerFragmentFrame>(*server_frame));
+                  [server_initial_metadata, server_to_client_messages,
+                   this](absl::optional<ServerFrame> server_frame) mutable {
+                    bool transport_closed = false;
+                    std::shared_ptr<ServerFragmentFrame> frame =
+                        std::make_shared<ServerFragmentFrame>();
+                    if (!server_frame.has_value()) {
+                      // Server frames pipe is closed by sender, return
+                      // ServerMetadata with error.
+                      transport_closed = true;
+                    } else {
+                      frame = std::make_shared<ServerFragmentFrame>(std::move(
+                          absl::get<ServerFragmentFrame>(*server_frame)));
+                    }
                     return TrySeq(
-                        If((frame.headers != nullptr),
+                        If((frame != nullptr && frame->headers != nullptr),
                            [server_initial_metadata,
-                            headers = std::move(frame.headers)]() mutable {
+                            headers = std::move(frame->headers)]() mutable {
                              return server_initial_metadata->Push(
                                  std::move(headers));
                            },
                            [] { return false; }),
-                        If((frame.message != nullptr),
+                        If((frame != nullptr && frame->message != nullptr),
                            [server_to_client_messages,
-                            message = std::move(frame.message)]() mutable {
+                            message = std::move(frame->message)]() mutable {
                              return server_to_client_messages->Push(
                                  std::move(message));
                            },
                            [] { return false; }),
-                        If((frame.trailers != nullptr),
-                           [trailers = std::move(frame.trailers)]() mutable
+                        If((frame != nullptr && frame->trailers != nullptr),
+                           [trailers = std::move(frame->trailers)]() mutable
                            -> LoopCtl<ServerMetadataHandle> {
                              return std::move(trailers);
                            },
-                           []() -> LoopCtl<ServerMetadataHandle> {
+                           [transport_closed,
+                            this]() mutable -> LoopCtl<ServerMetadataHandle> {
+                             if (transport_closed) {
+                               auto trailers =
+                                   arena_->MakePooled<ServerMetadata>(
+                                       arena_.get());
+                               grpc_status_code code;
+                               std::string message;
+                               grpc_error_get_status(
+                                   absl::UnavailableError(
+                                       "Transport is unavailable."),
+                                   Timestamp::InfFuture(), &code, &message,
+                                   nullptr, nullptr);
+                               trailers->Set(GrpcStatusMetadata(), code);
+                               trailers->Set(GrpcMessageMetadata(),
+                                             Slice::FromCopiedString(message));
+                               std::cout << "\n transport close.";
+                               fflush(stdout);
+                               return std::move(trailers);
+                             }
                              return Continue();
                            }));
                   });
             })),
         [](std::tuple<Empty, ServerMetadataHandle> ret) {
+          std::cout << "\n write/read frame done.";
+          fflush(stdout);
           return std::move(std::get<1>(ret));
         });
   }
@@ -165,7 +228,7 @@ class ClientTransport {
  private:
   // Max buffer is set to 4, so that for stream writes each time it will queue
   // at most 2 frames.
-  MpscReceiver<ClientFrame> outgoing_frames_;
+  std::shared_ptr<MpscReceiver<ClientFrame>> outgoing_frames_;
   // Queue size of each stream pipe is set to 2, so that for each stream read it
   // will queue at most 2 frames.
   static const size_t server_frame_queue_size_ = 2;

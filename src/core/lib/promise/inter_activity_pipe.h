@@ -108,6 +108,10 @@ class InterActivityPipe {
       if (center_ != nullptr) center_->MarkClosed();
     }
 
+    void MarkClose() {
+      if (center_ != nullptr) center_->MarkClosed();
+    }
+
     auto Push(T value) {
       return [center = center_, value = std::move(value)]() mutable {
         return center->Push(value);
