@@ -19,6 +19,7 @@
 #include <stdio.h>
 
 #include <algorithm>  // IWYU pragma: keep
+#include <cstddef>
 #include <memory>
 #include <string>  // IWYU pragma: keep
 #include <tuple>
