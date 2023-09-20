@@ -20,7 +20,6 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include <cstddef>
 #include <initializer_list>  // IWYU pragma: keep
 #include <iostream>
 #include <map>
