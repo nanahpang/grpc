@@ -61,6 +61,7 @@ ClientTransport::ClientTransport(
           ResourceQuota::Default()->memory_quota()->CreateMemoryAllocator(
               "client_transport")),
       arena_(MakeScopedArena(1024, &memory_allocator_)),
+      context_(arena_.get()),
       event_engine_(event_engine) {
   auto write_loop = Loop([this] {
     return TrySeq(
@@ -154,7 +155,6 @@ ClientTransport::ClientTransport(
           ServerFragmentFrame frame;
           // Initialized to get this_cpu() info in global_stat().
           ExecCtx exec_ctx;
-          frame.SetArena(arena_);
           // Deserialize frame from read buffer.
           auto status = frame.Deserialize(hpack_parser_.get(), *frame_header_,
                                           control_endpoint_read_buffer_);

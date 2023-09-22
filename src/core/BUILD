@@ -5657,7 +5657,10 @@ grpc_cc_library(
     hdrs = [
         "ext/transport/chttp2/transport/ping_abuse_policy.h",
     ],
-    external_deps = ["absl/types:optional"],
+    external_deps = [
+        "absl/strings",
+        "absl/types:optional",
+    ],
     deps = [
         "channel_args",
         "time",
@@ -5899,6 +5902,7 @@ grpc_cc_library(
         "arena",
         "bitset",
         "chaotic_good_frame_header",
+        "context",
         "no_destruct",
         "slice",
         "slice_buffer",
@@ -6078,6 +6082,7 @@ grpc_cc_library(
         "arena",
         "chaotic_good_frame",
         "chaotic_good_frame_header",
+        "context",
         "event_engine_wakeup_scheduler",
         "for_each",
         "grpc_promise_endpoint",

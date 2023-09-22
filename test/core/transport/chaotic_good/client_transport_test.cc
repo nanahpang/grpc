@@ -16,8 +16,6 @@
 
 // IWYU pragma: no_include <sys/socket.h>
 
-#include <stdio.h>
-
 #include <algorithm>  // IWYU pragma: keep
 #include <memory>
 #include <string>  // IWYU pragma: keep
@@ -551,16 +549,17 @@ TEST_F(ClientTransportTest, AddMultipleStreams) {
   AddExpectations(/*num_of_streams*/ 2, /*messages*/ 1, /*success*/ true);
   InitialClientTransport();
   auto messages = CreateMessages(2);
-  ClientMetadataHandle md;
+  ClientMetadataHandle first_stream_md;
+  ClientMetadataHandle second_stream_md;
   auto first_stream_args =
-      CallArgs{std::move(md),
+      CallArgs{std::move(first_stream_md),
                ClientInitialMetadataOutstandingToken::Empty(),
                nullptr,
                &pipe_server_intial_metadata_.sender,
                &pipe_client_to_server_messages_.receiver,
                &pipe_server_to_client_messages_.sender};
   auto second_stream_args =
-      CallArgs{std::move(md),
+      CallArgs{std::move(second_stream_md),
                ClientInitialMetadataOutstandingToken::Empty(),
                nullptr,
                &pipe_server_intial_metadata_second_.sender,
@@ -710,16 +709,17 @@ TEST_F(ClientTransportTest, AddMultipleStreamsMultipleMessages) {
   AddExpectations(/*num_of_streams*/ 2, /*messages*/ 3, /*success*/ true);
   InitialClientTransport();
   auto messages = CreateMessages(6);
-  ClientMetadataHandle md;
+  ClientMetadataHandle first_stream_md;
+  ClientMetadataHandle second_stream_md;
   auto first_stream_args =
-      CallArgs{std::move(md),
+      CallArgs{std::move(first_stream_md),
                ClientInitialMetadataOutstandingToken::Empty(),
                nullptr,
                &pipe_server_intial_metadata_.sender,
                &pipe_client_to_server_messages_.receiver,
                &pipe_server_to_client_messages_.sender};
   auto second_stream_args =
-      CallArgs{std::move(md),
+      CallArgs{std::move(second_stream_md),
                ClientInitialMetadataOutstandingToken::Empty(),
                nullptr,
                &pipe_server_intial_metadata_second_.sender,
