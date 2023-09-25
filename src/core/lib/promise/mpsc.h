@@ -164,6 +164,9 @@ class MpscReceiver {
   ~MpscReceiver() {
     if (center_ != nullptr) center_->ReceiverClosed();
   }
+  void MarkClosed() {
+    if (center_ != nullptr) center_->ReceiverClosed();
+  }
   MpscReceiver(const MpscReceiver&) = delete;
   MpscReceiver& operator=(const MpscReceiver&) = delete;
   // Only movable until it's first polled, and so we don't need to contend with

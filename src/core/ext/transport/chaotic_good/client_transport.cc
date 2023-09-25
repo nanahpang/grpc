@@ -52,7 +52,7 @@ ClientTransport::ClientTransport(
     std::unique_ptr<PromiseEndpoint> control_endpoint,
     std::unique_ptr<PromiseEndpoint> data_endpoint,
     std::shared_ptr<grpc_event_engine::experimental::EventEngine> event_engine)
-    : outgoing_frames_(MpscReceiver<ClientFrame>(4)),
+    : outgoing_frames_(std::make_shared<MpscReceiver<ClientFrame>>(4)),
       control_endpoint_(std::move(control_endpoint)),
       data_endpoint_(std::move(data_endpoint)),
       control_endpoint_write_buffer_(SliceBuffer()),
@@ -68,7 +68,7 @@ ClientTransport::ClientTransport(
   auto write_loop = Loop([this] {
     return TrySeq(
         // Get next outgoing frame.
-        this->outgoing_frames_.Next(),
+        this->outgoing_frames_->Next(),
         // Construct data buffers that will be sent to the endpoints.
         [this](ClientFrame client_frame) {
           MatchMutable(
@@ -120,11 +120,14 @@ ClientTransport::ClientTransport(
   writer_ = MakeActivity(
       // Continuously write next outgoing frames to promise endpoints.
       std::move(write_loop), EventEngineWakeupScheduler(event_engine_),
-      [](absl::Status status) {
+      [this](absl::Status status) {
         GPR_ASSERT(status.code() == absl::StatusCode::kCancelled ||
                    status.code() == absl::StatusCode::kInternal);
-        // TODO(ladynana): handle the promise endpoint write failures with
-        // outgoing_frames.close() once available.
+        if (status.code() == absl::StatusCode::kInternal) {
+          std::cout << "\n write abort with error.";
+          fflush(stdout);
+          this->AbortWithError();
+        }
       });
   auto read_loop = Loop([this] {
     return TrySeq(
@@ -133,6 +136,8 @@ ClientTransport::ClientTransport(
         // Read different parts of the server frame from control/data endpoints
         // based on frame header.
         [this](SliceBuffer read_buffer) mutable {
+          std::cout << "\n read next frame.";
+          fflush(stdout);
           frame_header_ = std::make_shared<FrameHeader>(
               FrameHeader::Parse(
                   reinterpret_cast<const uint8_t*>(GRPC_SLICE_START_PTR(
@@ -163,6 +168,9 @@ ClientTransport::ClientTransport(
           // Move message into frame.
           frame.message = arena_->MakePooled<Message>(
               std::move(data_endpoint_read_buffer_), 0);
+          std::cout << "\n read frame message length "
+                    << frame.message->payload()->Length();
+          fflush(stdout);
           std::shared_ptr<
               InterActivityPipe<ServerFrame, server_frame_queue_size_>::Sender>
               sender;
@@ -170,11 +178,16 @@ ClientTransport::ClientTransport(
             MutexLock lock(&mu_);
             sender = stream_map_[frame.stream_id];
           }
+          std::cout << "\n read frame with trailer: "
+                    << (frame.trailers != nullptr);
+          fflush(stdout);
           return sender->Push(ServerFrame(std::move(frame)));
         },
         // Check if send frame to corresponding stream successfully.
         [](bool ret) -> LoopCtl<absl::Status> {
           if (ret) {
+            std::cout << "\n continue reader loop";
+            fflush(stdout);
             // Send incoming frames successfully.
             return Continue();
           } else {
@@ -185,11 +198,14 @@ ClientTransport::ClientTransport(
   reader_ = MakeActivity(
       // Continuously read next incoming frames from promise endpoints.
       std::move(read_loop), EventEngineWakeupScheduler(event_engine_),
-      [](absl::Status status) {
+      [this](absl::Status status) {
         GPR_ASSERT(status.code() == absl::StatusCode::kCancelled ||
                    status.code() == absl::StatusCode::kInternal);
-        // TODO(ladynana): handle the promise endpoint read failures with
-        // iterating stream_map_ and close all the pipes once available.
+        if (status.code() == absl::StatusCode::kInternal) {
+          std::cout << "\n read abort with error.";
+          fflush(stdout);
+          this->AbortWithError();
+        }
       });
 }
 
