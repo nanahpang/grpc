@@ -117,13 +117,13 @@ class ClientTransportTest : public ::testing::Test {
         pipe_client_to_server_messages_second_(arena_.get()),
         pipe_server_to_client_messages_second_(arena_.get()),
         pipe_server_intial_metadata_second_(arena_.get()) {}
-  // Expect how client transport will read from control/data endpoints with a
-  // test frame.
+  // Expect how client transport will write/read from control/data endpoints
+  // with a test frame.
   void AddExpectations(int num_of_streams, int successful_messages,
                        bool success) {
     AddWriteExpectations(num_of_streams * successful_messages, success);
     for (int i = 1; i <= num_of_streams; i++) {
-      AddReadExpectations(/*stream_id*/ i, 1, success);
+      AddReadExpectations(/*stream_id*/ i, successful_messages, success);
     }
     // The reader_ is pending for next message.
     EXPECT_CALL(control_endpoint_, Read).InSequence(control_endpoint_sequence);
@@ -209,19 +209,27 @@ class ClientTransportTest : public ::testing::Test {
   void AddReadExpectations(int stream_id, int messages, bool success) {
     if (!success) return;
 
-    for (int i = 0; i < messages; i++) {
+    for (int i = 1; i <= messages; i++) {
+      // last message return with trailers.
+      bool has_trailer = (i == messages);
+      bool initial_read = (i == 1);
       EXPECT_CALL(control_endpoint_, Read)
           .InSequence(control_endpoint_sequence)
-          .WillOnce(WithArgs<0, 1>(
-              [this, stream_id](absl::AnyInvocable<void(absl::Status)> on_read,
-                                grpc_event_engine::experimental::SliceBuffer*
-                                    buffer) mutable {
+          .WillOnce(
+              WithArgs<0, 1>([this, stream_id, has_trailer, initial_read, i](
+                                 absl::AnyInvocable<void(absl::Status)> on_read,
+                                 grpc_event_engine::experimental::SliceBuffer*
+                                     buffer) mutable {
+                std::cout << "\n expect read message " << i;
+                fflush(stdout);
                 // Construct test frame for EventEngine read: headers  (15
                 // bytes), message(16 bytes), message padding (48 byte),
                 // trailers (15 bytes).
                 const std::string frame_header = {
                     static_cast<char>(0x80),  // frame type = fragment
-                    0x03,                     // flag = has header + has trailer
+                    has_trailer ? static_cast<char>(0x03)
+                                : static_cast<char>(
+                                      0x01),  // flag = has header + has trailer
                     0x00,
                     0x00,
                     static_cast<char>(stream_id),  // stream id >= 1
@@ -240,7 +248,9 @@ class ClientTransportTest : public ::testing::Test {
                     0x00,
                     0x00,
                     0x00,
-                    0x0f,  // trailer length = 15
+                    has_trailer
+                        ? static_cast<char>(0x0f)
+                        : static_cast<char>(0x00),  // trailer length = 15
                     0x00,
                     0x00,
                     0x00};
@@ -249,14 +259,21 @@ class ClientTransportTest : public ::testing::Test {
                     grpc_slice_from_cpp_string(frame_header));
                 buffer->Append(std::move(slice));
                 // Execute read callback later to control when read starts.
-                read_callback.push_back(std::move(on_read));
+                if (initial_read) {
+                  std::cout << "\n initial read " << initial_read;
+                  fflush(stdout);
+                  read_callback.push_back(std::move(on_read));
+                  initial_read = false;
+                  return false;
+                }
                 // Return false to mock EventEngine read not finish.
-                return false;
+                return true;
               }));
       EXPECT_CALL(control_endpoint_, Read)
           .InSequence(control_endpoint_sequence)
           .WillOnce(WithArgs<1>(
-              [](grpc_event_engine::experimental::SliceBuffer* buffer) {
+              [has_trailer](
+                  grpc_event_engine::experimental::SliceBuffer* buffer) {
                 // Encoded string of header ":path: /demo.Service/Step".
                 const std::string header = {
                     0x10, 0x05, 0x3a, 0x70, 0x61, 0x74, 0x68, 0x12, 0x2f,
@@ -268,7 +285,8 @@ class ClientTransportTest : public ::testing::Test {
                                               0x74, 0x75, 0x73, 0x01, 0x30};
                 // Schedule mock_endpoint to read buffer.
                 grpc_event_engine::experimental::Slice slice(
-                    grpc_slice_from_cpp_string(header + trailers));
+                    grpc_slice_from_cpp_string(has_trailer ? (header + trailers)
+                                                           : header));
                 buffer->Append(std::move(slice));
                 return true;
               }));
@@ -494,6 +512,8 @@ TEST_F(ClientTransportTest, AddOneStreamMultipleMessages) {
                   [](std::tuple<absl::StatusOr<ServerMetadataHandle>,
                                 absl::Status>
                          ret) {
+                    std::cout << "\n AddStream finish.";
+                    fflush(stdout);
                     // AddStream finish with trailers "grpc-status:0".
                     EXPECT_EQ(std::get<0>(ret)
                                   .value()
@@ -507,6 +527,8 @@ TEST_F(ClientTransportTest, AddOneStreamMultipleMessages) {
                   // Receive server initial metadata.
                   Map(pipe_server_intial_metadata_.receiver.Next(),
                       [](NextResult<ServerMetadataHandle> r) {
+                        std::cout << "\n receive server initial_metadata.";
+                        fflush(stdout);
                         // Expect value: ":path: /demo.Service/Step"
                         EXPECT_TRUE(r.has_value());
                         EXPECT_EQ(r.value()
@@ -518,6 +540,54 @@ TEST_F(ClientTransportTest, AddOneStreamMultipleMessages) {
                   // Receive server to client messages.
                   Map(pipe_server_to_client_messages_.receiver.Next(),
                       [this](NextResult<MessageHandle> r) {
+                        std::cout << "\n receive server to client message.";
+                        fflush(stdout);
+                        EXPECT_TRUE(r.has_value());
+                        EXPECT_EQ(r.value()->payload()->JoinIntoString(),
+                                  message);
+                        return absl::OkStatus();
+                      }),
+                  // Receive server initial metadata.
+                  Map(pipe_server_intial_metadata_.receiver.Next(),
+                      [](NextResult<ServerMetadataHandle> r) {
+                        std::cout << "\n receive server initial_metadata.";
+                        fflush(stdout);
+                        // Expect value: ":path: /demo.Service/Step"
+                        EXPECT_TRUE(r.has_value());
+                        EXPECT_EQ(r.value()
+                                      ->get_pointer(HttpPathMetadata())
+                                      ->as_string_view(),
+                                  "/demo.Service/Step");
+                        return absl::OkStatus();
+                      }),
+                  // Receive server to client messages.
+                  Map(pipe_server_to_client_messages_.receiver.Next(),
+                      [this](NextResult<MessageHandle> r) {
+                        std::cout << "\n receive server to client message.";
+                        fflush(stdout);
+                        EXPECT_TRUE(r.has_value());
+                        EXPECT_EQ(r.value()->payload()->JoinIntoString(),
+                                  message);
+                        return absl::OkStatus();
+                      }),
+                  // Receive server initial metadata.
+                  Map(pipe_server_intial_metadata_.receiver.Next(),
+                      [](NextResult<ServerMetadataHandle> r) {
+                        std::cout << "\n receive server initial_metadata.";
+                        fflush(stdout);
+                        // Expect value: ":path: /demo.Service/Step"
+                        EXPECT_TRUE(r.has_value());
+                        EXPECT_EQ(r.value()
+                                      ->get_pointer(HttpPathMetadata())
+                                      ->as_string_view(),
+                                  "/demo.Service/Step");
+                        return absl::OkStatus();
+                      }),
+                  // Receive server to client messages.
+                  Map(pipe_server_to_client_messages_.receiver.Next(),
+                      [this](NextResult<MessageHandle> r) {
+                        std::cout << "\n receive server to client message.";
+                        fflush(stdout);
                         EXPECT_TRUE(r.has_value());
                         EXPECT_EQ(r.value()->payload()->JoinIntoString(),
                                   message);
@@ -801,6 +871,8 @@ TEST_F(ClientTransportTest, AddMultipleStreamsMultipleMessages) {
                   // Receive server initial metadata.
                   Map(pipe_server_intial_metadata_.receiver.Next(),
                       [](NextResult<ServerMetadataHandle> r) {
+                        std::cout << "\n receive server initial_metadata.";
+                        fflush(stdout);
                         // Expect value: ":path: /demo.Service/Step"
                         EXPECT_TRUE(r.has_value());
                         EXPECT_EQ(r.value()
@@ -812,6 +884,54 @@ TEST_F(ClientTransportTest, AddMultipleStreamsMultipleMessages) {
                   // Receive server to client messages.
                   Map(pipe_server_to_client_messages_.receiver.Next(),
                       [this](NextResult<MessageHandle> r) {
+                        std::cout << "\n receive server to client message.";
+                        fflush(stdout);
+                        EXPECT_TRUE(r.has_value());
+                        EXPECT_EQ(r.value()->payload()->JoinIntoString(),
+                                  message);
+                        return absl::OkStatus();
+                      }),
+                  // Receive server initial metadata.
+                  Map(pipe_server_intial_metadata_.receiver.Next(),
+                      [](NextResult<ServerMetadataHandle> r) {
+                        std::cout << "\n receive server initial_metadata.";
+                        fflush(stdout);
+                        // Expect value: ":path: /demo.Service/Step"
+                        EXPECT_TRUE(r.has_value());
+                        EXPECT_EQ(r.value()
+                                      ->get_pointer(HttpPathMetadata())
+                                      ->as_string_view(),
+                                  "/demo.Service/Step");
+                        return absl::OkStatus();
+                      }),
+                  // Receive server to client messages.
+                  Map(pipe_server_to_client_messages_.receiver.Next(),
+                      [this](NextResult<MessageHandle> r) {
+                        std::cout << "\n receive server to client message.";
+                        fflush(stdout);
+                        EXPECT_TRUE(r.has_value());
+                        EXPECT_EQ(r.value()->payload()->JoinIntoString(),
+                                  message);
+                        return absl::OkStatus();
+                      }),
+                  // Receive server initial metadata.
+                  Map(pipe_server_intial_metadata_.receiver.Next(),
+                      [](NextResult<ServerMetadataHandle> r) {
+                        std::cout << "\n receive server initial_metadata.";
+                        fflush(stdout);
+                        // Expect value: ":path: /demo.Service/Step"
+                        EXPECT_TRUE(r.has_value());
+                        EXPECT_EQ(r.value()
+                                      ->get_pointer(HttpPathMetadata())
+                                      ->as_string_view(),
+                                  "/demo.Service/Step");
+                        return absl::OkStatus();
+                      }),
+                  // Receive server to client messages.
+                  Map(pipe_server_to_client_messages_.receiver.Next(),
+                      [this](NextResult<MessageHandle> r) {
+                        std::cout << "\n receive server to client message.";
+                        fflush(stdout);
                         EXPECT_TRUE(r.has_value());
                         EXPECT_EQ(r.value()->payload()->JoinIntoString(),
                                   message);
@@ -831,6 +951,8 @@ TEST_F(ClientTransportTest, AddMultipleStreamsMultipleMessages) {
                   // Receive server initial metadata.
                   Map(pipe_server_intial_metadata_second_.receiver.Next(),
                       [](NextResult<ServerMetadataHandle> r) {
+                        std::cout << "\n receive server initial_metadata.";
+                        fflush(stdout);
                         // Expect value: ":path: /demo.Service/Step"
                         EXPECT_TRUE(r.has_value());
                         EXPECT_EQ(r.value()
@@ -842,6 +964,54 @@ TEST_F(ClientTransportTest, AddMultipleStreamsMultipleMessages) {
                   // Receive server to client messages.
                   Map(pipe_server_to_client_messages_second_.receiver.Next(),
                       [this](NextResult<MessageHandle> r) {
+                        std::cout << "\n receive server to client message.";
+                        fflush(stdout);
+                        EXPECT_TRUE(r.has_value());
+                        EXPECT_EQ(r.value()->payload()->JoinIntoString(),
+                                  message);
+                        return absl::OkStatus();
+                      }),
+                  // Receive server initial metadata.
+                  Map(pipe_server_intial_metadata_second_.receiver.Next(),
+                      [](NextResult<ServerMetadataHandle> r) {
+                        std::cout << "\n receive server initial_metadata.";
+                        fflush(stdout);
+                        // Expect value: ":path: /demo.Service/Step"
+                        EXPECT_TRUE(r.has_value());
+                        EXPECT_EQ(r.value()
+                                      ->get_pointer(HttpPathMetadata())
+                                      ->as_string_view(),
+                                  "/demo.Service/Step");
+                        return absl::OkStatus();
+                      }),
+                  // Receive server to client messages.
+                  Map(pipe_server_to_client_messages_second_.receiver.Next(),
+                      [this](NextResult<MessageHandle> r) {
+                        std::cout << "\n receive server to client message.";
+                        fflush(stdout);
+                        EXPECT_TRUE(r.has_value());
+                        EXPECT_EQ(r.value()->payload()->JoinIntoString(),
+                                  message);
+                        return absl::OkStatus();
+                      }),
+                  // Receive server initial metadata.
+                  Map(pipe_server_intial_metadata_second_.receiver.Next(),
+                      [](NextResult<ServerMetadataHandle> r) {
+                        std::cout << "\n receive server initial_metadata.";
+                        fflush(stdout);
+                        // Expect value: ":path: /demo.Service/Step"
+                        EXPECT_TRUE(r.has_value());
+                        EXPECT_EQ(r.value()
+                                      ->get_pointer(HttpPathMetadata())
+                                      ->as_string_view(),
+                                  "/demo.Service/Step");
+                        return absl::OkStatus();
+                      }),
+                  // Receive server to client messages.
+                  Map(pipe_server_to_client_messages_second_.receiver.Next(),
+                      [this](NextResult<MessageHandle> r) {
+                        std::cout << "\n receive server to client message.";
+                        fflush(stdout);
                         EXPECT_TRUE(r.has_value());
                         EXPECT_EQ(r.value()->payload()->JoinIntoString(),
                                   message);

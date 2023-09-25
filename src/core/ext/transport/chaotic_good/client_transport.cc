@@ -134,6 +134,8 @@ ClientTransport::ClientTransport(
         // Read different parts of the server frame from control/data endpoints
         // based on frame header.
         [this](SliceBuffer read_buffer) mutable {
+          std::cout << "\n read next frame.";
+          fflush(stdout);
           frame_header_ = std::make_shared<FrameHeader>(
               FrameHeader::Parse(
                   reinterpret_cast<const uint8_t*>(GRPC_SLICE_START_PTR(
@@ -162,6 +164,9 @@ ClientTransport::ClientTransport(
           // Move message into frame.
           frame.message = arena_->MakePooled<Message>(
               std::move(data_endpoint_read_buffer_), 0);
+          std::cout << "\n read frame message length "
+                    << frame.message->payload()->Length();
+          fflush(stdout);
           std::shared_ptr<
               InterActivityPipe<ServerFrame, server_frame_queue_size_>::Sender>
               sender;
@@ -169,11 +174,16 @@ ClientTransport::ClientTransport(
             MutexLock lock(&mu_);
             sender = stream_map_[frame.stream_id];
           }
+          std::cout << "\n read frame with trailer: "
+                    << (frame.trailers != nullptr);
+          fflush(stdout);
           return sender->Push(ServerFrame(std::move(frame)));
         },
         // Check if send frame to corresponding stream successfully.
         [](bool ret) -> LoopCtl<absl::Status> {
           if (ret) {
+            std::cout << "\n continue reader loop";
+            fflush(stdout);
             // Send incoming frames successfully.
             return Continue();
           } else {

@@ -98,17 +98,18 @@ class ClientTransport {
       MutexLock lock(&mu_);
       stream_map = stream_map_;
     }
-    for (const auto& i : stream_map) {
+    for (const auto& pair : stream_map) {
       std::cout << "\n close sender.";
       fflush(stdout);
-      i.second->MarkClose();
+      pair.second->MarkClose();
     }
   }
   auto AddStream(CallArgs call_args) {
     // At this point, the connection is set up.
     // Start sending data frames.
     uint64_t stream_id;
-    InterActivityPipe<ServerFrame, server_frame_queue_size_> server_frames;
+    auto server_frames = std::make_shared<
+        InterActivityPipe<ServerFrame, server_frame_queue_size_>>();
     {
       MutexLock lock(&mu_);
       stream_id = next_stream_id_++;
@@ -118,7 +119,7 @@ class ClientTransport {
                         ServerFrame, server_frame_queue_size_>::Sender>>(
               stream_id, std::make_shared<InterActivityPipe<
                              ServerFrame, server_frame_queue_size_>::Sender>(
-                             std::move(server_frames.sender))));
+                             std::move(server_frames->sender))));
     }
     auto outgoing_frame = outgoing_frames_->MakeSender();
     return TrySeq(
@@ -145,7 +146,7 @@ class ClientTransport {
                               return absl::InternalError(
                                   "Send frame to outgoing_frames failed.");
                             }
-                            std::cout << "\n write send frame done.";
+                            std::cout << "\n write send client frame done.";
                             fflush(stdout);
                             return absl::OkStatus();
                           });
@@ -155,11 +156,10 @@ class ClientTransport {
             Loop([server_initial_metadata = call_args.server_initial_metadata,
                   server_to_client_messages =
                       call_args.server_to_client_messages,
-                  receiver = std::move(server_frames.receiver),
-                  this]() mutable {
+                  server_frames, this]() mutable {
               return TrySeq(
                   // Receive incoming server frame.
-                  receiver.Next(),
+                  server_frames->receiver.Next(),
                   // Save incomming frame results to call_args.
                   [server_initial_metadata, server_to_client_messages,
                    this](absl::optional<ServerFrame> server_frame) mutable {
@@ -169,11 +169,15 @@ class ClientTransport {
                     if (!server_frame.has_value()) {
                       // Server frames pipe is closed by sender, return
                       // ServerMetadata with error.
+                      std::cout << "\n read transport close.";
+                      fflush(stdout);
                       transport_closed = true;
                     } else {
                       frame = std::make_shared<ServerFragmentFrame>(std::move(
                           absl::get<ServerFragmentFrame>(*server_frame)));
                     }
+                    std::cout << "\n read server frame.";
+                    fflush(stdout);
                     return TrySeq(
                         If((frame != nullptr && frame->headers != nullptr),
                            [server_initial_metadata,
@@ -192,6 +196,8 @@ class ClientTransport {
                         If((frame != nullptr && frame->trailers != nullptr),
                            [trailers = std::move(frame->trailers)]() mutable
                            -> LoopCtl<ServerMetadataHandle> {
+                             std::cout << "\n read return trailers.";
+                             fflush(stdout);
                              return std::move(trailers);
                            },
                            [transport_closed,
@@ -210,10 +216,12 @@ class ClientTransport {
                                trailers->Set(GrpcStatusMetadata(), code);
                                trailers->Set(GrpcMessageMetadata(),
                                              Slice::FromCopiedString(message));
-                               std::cout << "\n transport close.";
+                               std::cout << "\n read transport close.";
                                fflush(stdout);
                                return std::move(trailers);
                              }
+                             std::cout << "\n continue read.";
+                             fflush(stdout);
                              return Continue();
                            }));
                   });
