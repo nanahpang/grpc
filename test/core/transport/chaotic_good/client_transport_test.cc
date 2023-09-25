@@ -215,7 +215,7 @@ class ClientTransportTest : public ::testing::Test {
       EXPECT_CALL(control_endpoint_, Read)
           .InSequence(control_endpoint_sequence)
           .WillOnce(
-              WithArgs<0, 1>([this, stream_id, has_trailer, initial_read, i](
+              WithArgs<0, 1>([this, stream_id, has_trailer, initial_read](
                                  absl::AnyInvocable<void(absl::Status)> on_read,
                                  grpc_event_engine::experimental::SliceBuffer*
                                      buffer) mutable {
