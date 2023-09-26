@@ -199,7 +199,6 @@ ClientTransport::ClientTransport(
       },
       // Hold Arena in activity for GetContext<Arena> usage.
       arena_.get());
-
 }
 
 }  // namespace chaotic_good
