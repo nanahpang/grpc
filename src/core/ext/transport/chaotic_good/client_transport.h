@@ -143,7 +143,7 @@ class ClientTransport {
                           outgoing_frame.Send(ClientFrame(std::move(frame))),
                           [](bool success) -> absl::Status {
                             if (!success) {
-                              return absl::InternalError(
+                              return absl::UnavailableError(
                                   "Send frame to outgoing_frames failed.");
                             }
                             std::cout << "\n write send client frame done.";
