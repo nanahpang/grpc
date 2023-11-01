@@ -149,42 +149,45 @@ class ClientTransport {
                     bool has_message = (frame.message != nullptr);
                     bool has_trailers = (frame.trailers != nullptr);
                     return TrySeq(
-                        If(has_headers,
-                           [server_initial_metadata,
-                            headers = std::move(frame.headers)]() mutable {
-                             std::cout
-                                 << "Receive headers " << headers->DebugString()
-                                 << " push to pipe " << server_initial_metadata
-                                 << "\n";
-                             fflush(stdout);
-                             return server_initial_metadata->Push(
-                                 std::move(headers));
-                           },
-                           [] { return false; }),
-                        If(has_message,
-                           [server_to_client_messages,
-                            message = std::move(frame.message)]() mutable {
-                             std::cout << "Receive message "
-                                       << message->DebugString()
-                                       << " push to pipe "
-                                       << server_to_client_messages << "\n";
-                             fflush(stdout);
-                             return server_to_client_messages->Push(
-                                 std::move(message));
-                           },
-                           [] { return false; }),
-                        If(has_trailers,
-                           [trailers = std::move(frame.trailers)]() mutable
-                           -> LoopCtl<ServerMetadataHandle> {
-                             std::cout << "Receive trailers "
-                                       << trailers->DebugString()
-                                       << " return \n";
-                             fflush(stdout);
-                             return std::move(trailers);
-                           },
-                           []() -> LoopCtl<ServerMetadataHandle> {
-                             return Continue();
-                           }));
+                        If(
+                            has_headers,
+                            [server_initial_metadata,
+                             headers = std::move(frame.headers)]() mutable {
+                              std::cout << "Receive headers "
+                                        << headers->DebugString()
+                                        << " push to pipe "
+                                        << server_initial_metadata << "\n";
+                              fflush(stdout);
+                              return server_initial_metadata->Push(
+                                  std::move(headers));
+                            },
+                            [] { return false; }),
+                        If(
+                            has_message,
+                            [server_to_client_messages,
+                             message = std::move(frame.message)]() mutable {
+                              std::cout << "Receive message "
+                                        << message->DebugString()
+                                        << " push to pipe "
+                                        << server_to_client_messages << "\n";
+                              fflush(stdout);
+                              return server_to_client_messages->Push(
+                                  std::move(message));
+                            },
+                            [] { return false; }),
+                        If(
+                            has_trailers,
+                            [trailers = std::move(frame.trailers)]() mutable
+                            -> LoopCtl<ServerMetadataHandle> {
+                              std::cout << "Receive trailers "
+                                        << trailers->DebugString()
+                                        << " return \n";
+                              fflush(stdout);
+                              return std::move(trailers);
+                            },
+                            []() -> LoopCtl<ServerMetadataHandle> {
+                              return Continue();
+                            }));
                   });
             })),
         [](std::tuple<Empty, ServerMetadataHandle> ret) {
