@@ -81,17 +81,19 @@ class ClientTransport {
     // At this point, the connection is set up.
     // Start sending data frames.
     uint32_t stream_id;
-    auto pipe_server_frames = std::make_shared<InterActivityPipe<ServerFrame, server_frame_queue_size_>>();
+    auto pipe_server_frames = std::make_shared<
+        InterActivityPipe<ServerFrame, server_frame_queue_size_>>();
     {
       MutexLock lock(&mu_);
       stream_id = next_stream_id_++;
-      std::cout << "Stream " << stream_id <<" server frame pipe sender " << &pipe_server_frames->sender << "\n";
-      std::cout << "Stream " << stream_id <<" server frame pipe receiver " << &pipe_server_frames->receiver << "\n";
+      std::cout << "Stream " << stream_id << " server frame pipe sender "
+                << &pipe_server_frames->sender << "\n";
+      std::cout << "Stream " << stream_id << " server frame pipe receiver "
+                << &pipe_server_frames->receiver << "\n";
       fflush(stdout);
       stream_map_.insert(
-          std::pair<uint32_t,
-                    std::shared_ptr<InterActivityPipe<
-                        ServerFrame, server_frame_queue_size_>>>(
+          std::pair<uint32_t, std::shared_ptr<InterActivityPipe<
+                                  ServerFrame, server_frame_queue_size_>>>(
               stream_id, pipe_server_frames));
     }
     return TrySeq(
@@ -133,8 +135,10 @@ class ClientTransport {
             Loop([server_initial_metadata = call_args.server_initial_metadata,
                   server_to_client_messages =
                       call_args.server_to_client_messages,
-                   pipe_server_frames, stream_id]() mutable {
-              std::cout << "Stream " << stream_id <<" Loop server frame pipe receiver " << &pipe_server_frames->receiver << "\n";
+                  pipe_server_frames, stream_id]() mutable {
+              std::cout << "Stream " << stream_id
+                        << " Loop server frame pipe receiver "
+                        << &pipe_server_frames->receiver << "\n";
               fflush(stdout);
               return TrySeq(
                   // Receive incoming server frame.
@@ -210,8 +214,9 @@ class ClientTransport {
   Mutex mu_;
   uint32_t next_stream_id_ ABSL_GUARDED_BY(mu_) = 1;
   // Map of stream incoming server frames, key is stream_id.
-  std::map<uint32_t, std::shared_ptr<InterActivityPipe<
-                         ServerFrame, server_frame_queue_size_>>>
+  std::map<
+      uint32_t,
+      std::shared_ptr<InterActivityPipe<ServerFrame, server_frame_queue_size_>>>
       stream_map_ ABSL_GUARDED_BY(mu_);
   ActivityPtr writer_;
   ActivityPtr reader_;
