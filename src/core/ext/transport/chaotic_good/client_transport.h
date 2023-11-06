@@ -138,10 +138,10 @@ class ClientTransport {
                       outgoing_frames.Send(ClientFrame(std::move(frame))),
                       [](bool success) -> absl::Status {
                         if (!success) {
-                              return absl::UnavailableError(
-                                  "Transport closed due to endpoint write/read "
-                                  "failed.");
-                            }
+                          return absl::UnavailableError(
+                              "Transport closed due to endpoint write/read "
+                              "failed.");
+                        }
                         return absl::OkStatus();
                       });
                 }),
@@ -171,29 +171,26 @@ class ClientTransport {
                     bool has_message = (frame.message != nullptr);
                     bool has_trailers = (frame.trailers != nullptr);
                     return TrySeq(
-                        If(
-                            (!transport_closed) && has_headers,
-                            [server_initial_metadata,
-                             headers = std::move(frame.headers)]() mutable {
-                              return server_initial_metadata->Push(
-                                  std::move(headers));
-                            },
-                            [] { return false; }),
-                        If(
-                            (!transport_closed) && has_message,
-                            [server_to_client_messages,
-                             message = std::move(frame.message)]() mutable {
-                              return server_to_client_messages->Push(
-                                  std::move(message));
-                            },
-                            [] { return false; }),
-                        If(
-                            (!transport_closed) && has_trailers,
-                            [trailers = std::move(frame.trailers)]() mutable
-                            -> LoopCtl<ServerMetadataHandle> {
-                              return std::move(trailers);
-                            },
-                            [transport_closed]()
+                        If((!transport_closed) && has_headers,
+                           [server_initial_metadata,
+                            headers = std::move(frame.headers)]() mutable {
+                             return server_initial_metadata->Push(
+                                 std::move(headers));
+                           },
+                           [] { return false; }),
+                        If((!transport_closed) && has_message,
+                           [server_to_client_messages,
+                            message = std::move(frame.message)]() mutable {
+                             return server_to_client_messages->Push(
+                                 std::move(message));
+                           },
+                           [] { return false; }),
+                        If((!transport_closed) && has_trailers,
+                           [trailers = std::move(frame.trailers)]() mutable
+                           -> LoopCtl<ServerMetadataHandle> {
+                             return std::move(trailers);
+                           },
+                           [transport_closed]()
                                -> LoopCtl<ServerMetadataHandle> {
                              if (transport_closed) {
                                return ServerMetadataFromStatus(

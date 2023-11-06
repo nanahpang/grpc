@@ -141,7 +141,6 @@ class ClientTransportTest : public ::testing::Test {
                   read_callback_ = std::move(on_read);
                 }
                 return false;
-
               }));
     } else {
       // reader_ is pending for next read.
@@ -753,8 +752,7 @@ TEST_F(ClientTransportTest, AddMultipleStreamsWithWriteFailed) {
   EXPECT_CALL(on_done, Call(absl::OkStatus()));
   auto activity = MakeActivity(
       // Concurrently: write and read messages from client transport.
-          Seq(
-        Join(
+      Seq(Join(
               // Add first stream with call_args into client transport.
               AddStream(std::move(first_stream_args), GRPC_STATUS_OK),
               // Start read from control endpoints.
@@ -817,8 +815,7 @@ TEST_F(ClientTransportTest, AddMultipleStreamsWithReadFailed) {
   StrictMock<MockFunction<void(absl::Status)>> on_done;
   EXPECT_CALL(on_done, Call(absl::OkStatus()));
   auto activity = MakeActivity(
-      Seq(
-        Join(
+      Seq(Join(
               // Add first stream with call_args into client transport.
               AddStream(std::move(first_stream_args), GRPC_STATUS_OK),
               // Start read from control endpoints.
