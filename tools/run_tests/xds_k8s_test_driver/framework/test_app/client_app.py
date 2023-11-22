@@ -318,11 +318,13 @@ class XdsTestClient(framework.rpc.grpc.GrpcApp):
                     channel, **rpc_params
                 )
                 logger.info(
-                    "[%s] Detected successful calls to xDS control plane: %s",
+                    "[%s] Detected successful calls to xDS control plane %s,"
+                    " channel: %s",
                     self.hostname,
                     xds_server_uri,
+                    _ChannelzServiceClient.channel_repr(channel),
                 )
-            except self.NotFound as e:
+            except self.NotFound:
                 # Otherwise, keep searching.
                 continue
 
@@ -330,7 +332,7 @@ class XdsTestClient(framework.rpc.grpc.GrpcApp):
 
         raise self.ChannelNotActive(
             f"[{self.hostname}] Client has no"
-            f" active channel with xds server {xds_server_uri}",
+            f" active channel with xDS control plane {xds_server_uri}",
             src=self.hostname,
             dst=xds_server_uri,
         )

@@ -22,6 +22,10 @@
 # allow_in_fuzzing_config: optional boolean (true if not specified)
 #              if false, this experiment will not be included in fuzzers that
 #              explore the config space
+# requires:    A list of names of experiments that this experiment depends on.
+#              Defaults to the empty list.
+#              If any of the experiments in the required list is determined to
+#              be disabled at runtime, this experiment is disabled at runtime.
 #
 # Well known test tags:
 #   core_end2end_test:   all tests, fixtures in the core end2end suite
@@ -49,7 +53,7 @@
 - name: canary_client_privacy
   description:
     If set, canary client privacy
-  expiry: 2023/11/01
+  expiry: 2024/04/01
   owner: alishananda@google.com
   test_tags: []
   allow_in_fuzzing_config: false
@@ -59,12 +63,14 @@
   expiry: 2024/03/03
   owner: ctiller@google.com
   test_tags: ["cpp_end2end_test", "flow_control_test"]
+  requires: [combiner_offload_to_event_engine]
 - name: chttp2_offload_on_rst_stream
   description:
     Offload work on RST_STREAM.
   expiry: 2024/03/03
   owner: ctiller@google.com
   test_tags: ["cpp_end2end_test", "flow_control_test"]
+  requires: [combiner_offload_to_event_engine]
 - name: client_idleness
   description: If enabled, client channel idleness is enabled by default.
   expiry: 2023/12/15
@@ -73,7 +79,7 @@
 - name: client_privacy
   description:
     If set, client privacy
-  expiry: 2023/11/01
+  expiry: 2024/04/01
   owner: alishananda@google.com
   test_tags: []
   allow_in_fuzzing_config: false
@@ -102,7 +108,7 @@
   test_tags: ["core_end2end_test", "event_engine_listener_test"]
 - name: free_large_allocator
   description: If set, return all free bytes from a "big" allocator
-  expiry: 2023/11/01
+  expiry: 2024/04/01
   owner: alishananda@google.com
   test_tags: [resource_quota_test]
 - name: http2_stats_fix
@@ -165,6 +171,17 @@
   expiry: 2024/01/01
   owner: vigneshbabu@google.com
   test_tags: ["flow_control_test"]
+- name: pending_queue_cap
+  description:
+    In the sync & async apis (but not the callback api), cap the number of
+    received but unrequested requests in the server for each call type.
+    A received message is one that was read from the wire on the server.
+    A requested message is one explicitly requested by the application using
+    grpc_server_request_call or grpc_server_request_registered_call (or their
+    wrappers in the C++ API).
+  expiry: 2024/05/05
+  owner: ctiller@google.com
+  test_tags: []
 - name: pick_first_happy_eyeballs
   description:
     Use Happy Eyeballs in pick_first.
@@ -199,6 +216,7 @@
   expiry: 2024/06/14
   owner: ctiller@google.com
   test_tags: ["core_end2end_test", "cpp_end2end_test", "xds_end2end_test", "logging_test"]
+  requires: [lazier_stream_updates]
 - name: red_max_concurrent_streams
   description:
     Perform random early rejection of requests that would exceed a newly reduced
@@ -230,7 +248,7 @@
   description:
     Change round_robin code to delegate to pick_first as per dualstack
     backend design.
-  expiry: 2023/11/15
+  expiry: 2023/12/15
   owner: roth@google.com
   test_tags: ["lb_unit_test", "cpp_lb_end2end_test", "xds_end2end_test"]
 - name: rstpit
@@ -256,7 +274,7 @@
 - name: server_privacy
   description:
     If set, server privacy
-  expiry: 2023/11/01
+  expiry: 2024/04/01
   owner: alishananda@google.com
   test_tags: []
   allow_in_fuzzing_config: false
@@ -296,6 +314,10 @@
   expiry: 2024/02/01
   owner: ctiller@google.com
   test_tags: [resource_quota_test]
+- name: uniquely_unowned
+  description: Ensure HPACK table takes a unique copy of data when parsing unknown metadata
+  expiry: 2024/03/03
+  owner: ctiller@google.com
 - name: work_serializer_clears_time_cache
   description:
     Have the work serializer clear the time cache when it dispatches work.
@@ -316,6 +338,7 @@
   expiry: 2024/03/03
   owner: ctiller@google.com
   test_tags: [flow_control_test]
+  requires: [write_size_policy]
 - name: write_size_policy
   description:
     Try to size writes such that they don't create too large of a backlog
@@ -326,6 +349,6 @@
   description:
     Change WRR code to delegate to pick_first as per dualstack
     backend design.
-  expiry: 2023/11/15
+  expiry: 2023/12/15
   owner: roth@google.com
   test_tags: ["lb_unit_test", "cpp_lb_end2end_test", "xds_end2end_test"]

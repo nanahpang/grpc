@@ -30,8 +30,8 @@ licenses(["reciprocal"])
 package(
     default_visibility = ["//visibility:public"],
     features = [
-        "layering_check",
         "-parse_headers",
+        "layering_check",
     ],
 )
 
@@ -211,11 +211,11 @@ config_setting(
 python_config_settings()
 
 # This should be updated along with build_handwritten.yaml
-g_stands_for = "gjallarhorn"  # @unused
+g_stands_for = "grand"  # @unused
 
-core_version = "36.0.0"  # @unused
+core_version = "37.0.0"  # @unused
 
-version = "1.60.0-dev"  # @unused
+version = "1.61.0-dev"  # @unused
 
 GPR_PUBLIC_HDRS = [
     "include/grpc/support/alloc.h",
@@ -1009,6 +1009,7 @@ grpc_cc_library(
         "absl/strings",
         "absl/types:optional",
         "absl/types:span",
+        "upb_base_lib",
         "upb_collections_lib",
         "upb_lib",
     ],
@@ -1144,6 +1145,7 @@ grpc_cc_library(
 grpc_cc_library(
     name = "grpc++_xds_server",
     srcs = [
+        "src/cpp/server/xds_server_builder.cc",
         "src/cpp/server/xds_server_credentials.cc",
     ],
     hdrs = [
@@ -1155,6 +1157,7 @@ grpc_cc_library(
     ],
     visibility = ["@grpc:xds"],
     deps = [
+        "channel_arg_names",
         "gpr",
         "grpc",
         "grpc++_base",
@@ -1211,6 +1214,7 @@ grpc_cc_library(
         "include/grpcpp/security/alts_util.h",
     ],
     external_deps = [
+        "upb_base_lib",
         "upb_collections_lib",
         "upb_lib",
     ],
@@ -1491,13 +1495,13 @@ grpc_cc_library(
         "absl/functional:function_ref",
         "absl/hash",
         "absl/meta:type_traits",
+        "absl/random",
         "absl/status",
         "absl/status:statusor",
         "absl/strings",
         "absl/strings:str_format",
         "absl/time",
         "absl/types:optional",
-        "absl/types:variant",
         "absl/utility",
         "madler_zlib",
     ],
@@ -1576,7 +1580,6 @@ grpc_cc_library(
         "//src/core:latch",
         "//src/core:loop",
         "//src/core:map",
-        "//src/core:match",
         "//src/core:memory_quota",
         "//src/core:metadata_compression_traits",
         "//src/core:no_destruct",
@@ -1588,6 +1591,7 @@ grpc_cc_library(
         "//src/core:posix_event_engine_base_hdrs",
         "//src/core:promise_status",
         "//src/core:race",
+        "//src/core:random_early_detection",
         "//src/core:ref_counted",
         "//src/core:ref_counted_string",
         "//src/core:resolved_address",
@@ -1928,6 +1932,7 @@ grpc_cc_library(
         "absl/synchronization",
         "absl/memory",
         "absl/types:optional",
+        "upb_base_lib",
         "upb_lib",
         "protobuf_headers",
         "absl/container:inlined_vector",
@@ -2002,6 +2007,7 @@ grpc_cc_library(
         "absl/synchronization",
         "absl/types:optional",
         "absl/memory",
+        "upb_base_lib",
         "upb_lib",
         "absl/strings:str_format",
         "protobuf_headers",
@@ -2171,6 +2177,7 @@ grpc_cc_library(
         "absl/strings",
         "absl/time",
         "absl/types:optional",
+        "upb_base_lib",
         "upb_lib",
     ],
     language = "c++",
@@ -2934,6 +2941,7 @@ grpc_cc_library(
         "//src/core:lib/resolver/endpoint_addresses.h",
     ],
     external_deps = [
+        "absl/functional:function_ref",
         "absl/status",
         "absl/status:statusor",
         "absl/strings",
@@ -3061,6 +3069,7 @@ grpc_cc_library(
         "absl/strings:cord",
         "absl/types:optional",
         "absl/types:variant",
+        "upb_base_lib",
         "upb_collections_lib",
         "upb_lib",
     ],
@@ -3485,6 +3494,7 @@ grpc_cc_library(
         "//src/core:tsi/alts/zero_copy_frame_protector/alts_zero_copy_grpc_protector.h",
     ],
     external_deps = [
+        "absl/types:span",
         "libcrypto",
         "libssl",
     ],
@@ -3670,7 +3680,9 @@ grpc_cc_library(
         "absl/strings",
         "absl/strings:str_format",
         "absl/types:optional",
+        "upb_base_lib",
         "upb_lib",
+        "upb_mem_lib",
         "upb_textformat_lib",
         "upb_json_lib",
         "upb_reflection",
@@ -3745,9 +3757,9 @@ grpc_cc_library(
     hdrs = ["//src/core:ext/filters/client_channel/resolver/fake/fake_resolver.h"],
     external_deps = [
         "absl/base:core_headers",
-        "absl/status",
-        "absl/status:statusor",
         "absl/strings",
+        "absl/time",
+        "absl/types:optional",
     ],
     language = "c++",
     visibility = [
@@ -3757,7 +3769,6 @@ grpc_cc_library(
     deps = [
         "config",
         "debug_location",
-        "endpoint_addresses",
         "gpr",
         "grpc_public_hdrs",
         "grpc_resolver",
@@ -3766,7 +3777,6 @@ grpc_cc_library(
         "uri_parser",
         "work_serializer",
         "//src/core:channel_args",
-        "//src/core:grpc_service_config",
         "//src/core:notification",
         "//src/core:ref_counted",
         "//src/core:useful",
@@ -3860,8 +3870,10 @@ grpc_cc_library(
     deps = [
         "gpr",
         "grpc_base",
+        "ref_counted_ptr",
         "//src/core:error",
         "//src/core:hpack_constants",
+        "//src/core:ref_counted",
         "//src/core:slice",
         "//src/core:status_helper",
     ],
