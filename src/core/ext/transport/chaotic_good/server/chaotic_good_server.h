@@ -67,7 +67,7 @@ class ChaoticGoodServerListener
       public std::enable_shared_from_this<ChaoticGoodServerListener> {
  public:
   ChaoticGoodServerListener(Server* server, const ChannelArgs& args);
-  ~ChaoticGoodServerListener();
+  ~ChaoticGoodServerListener() override;
   // Bind address to EventEngine listener.
   absl::StatusOr<int> Bind(const char* addr);
   absl::Status StartListening();
@@ -77,7 +77,8 @@ class ChaoticGoodServerListener
   class ActiveConnection
       : public std::enable_shared_from_this<ActiveConnection> {
    public:
-    ActiveConnection(std::shared_ptr<ChaoticGoodServerListener> listener);
+    explicit ActiveConnection(
+        std::shared_ptr<ChaoticGoodServerListener> listener);
     ~ActiveConnection();
     void Start(std::unique_ptr<EventEngine::Endpoint> endpoint);
     const ChannelArgs& args() const { return listener_->args(); }
@@ -86,7 +87,7 @@ class ChaoticGoodServerListener
     class HandshakingState
         : public std::enable_shared_from_this<HandshakingState> {
      public:
-      HandshakingState(std::shared_ptr<ActiveConnection> connection);
+      explicit HandshakingState(std::shared_ptr<ActiveConnection> connection);
       ~HandshakingState(){};
       void Start(std::unique_ptr<EventEngine::Endpoint> endpoint);
 
