@@ -93,7 +93,7 @@ class ChaoticGoodServerTest : public ::testing::Test {
     StartServer();
     ConstructConnector();
   }
-  ~ChaoticGoodServerTest() { core_server_->StopListening(); }
+  ~ChaoticGoodServerTest() override { core_server_->StopListening(); }
 
   void StartServer() {
     port_ = grpc_pick_unused_port_or_die();
