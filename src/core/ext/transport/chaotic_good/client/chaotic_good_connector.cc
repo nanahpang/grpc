@@ -259,7 +259,7 @@ void ChaoticGoodConnector::Connect(const Args& args, Result* result,
       return;
     }
   }
-  args_ = std::move(args);
+  args_ = args;
   notify_ = notify;
   resolved_addr_ = EventEngine::ResolvedAddress(
       reinterpret_cast<const sockaddr*>(args.address->addr), args.address->len);
